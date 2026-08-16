@@ -404,6 +404,13 @@ function advance(g){
   }
   g.phase="over"; g.winner="nobody";
 }
+/* a player who's out of it has nothing left to hide — their hand goes public */
+function revealHand(gm,p,why){
+  if(p.revealed) return;
+  p.revealed=true;
+  gm.log.unshift({t:"reveal",byName:p.name,why:why,cards:(p.hand||[]).slice()});
+}
+
 /* pull a player out of the game for everyone, not just their own phone */
 function leaveGame(gm,id){
   const p=byId(gm,id); if(!p) return;
@@ -414,7 +421,7 @@ function leaveGame(gm,id){
   }
   p.wasOut = p.out===true;
   p.left=true; p.out=true;
-  gm.log.unshift({t:"left",byName:p.name});
+  revealHand(gm,p,"left the game");
   if(gm.pending){
     if(gm.pending.by===id){                       /* they asked, then walked */
       gm.pending=null;
@@ -568,7 +575,7 @@ function footer(){
     const mid = S.game && S.game.phase!=="lobby";
     return `<div class="rule"></div>
       <div class="err" style="margin-top:0">${mid
-        ?"Leave for good? Everyone will see you've gone, your turns get skipped, and your cards will answer suggestions on their own. You can come back with the same name."
+        ?"Leave for good? Everyone will see you've gone, your turns get skipped, and your hand is revealed to the whole table. You can come back with the same name."
         :"Leave this game? You'll be taken off the list."}</div>
       <button class="btn signal" data-a="leave">Yes, leave</button>
       <button class="btn ghost" data-a="stay">Stay</button>`;
@@ -726,7 +733,7 @@ function table(){
           <div class="eyebrow">Your move</div>
           ${me.pulled?'<p class="note" style="margin-top:0;color:var(--brass)">You were dragged into the '+esc(inRoom)+'. Ask from here without rolling, or roll and move away.</p>'
                      :'<p class="note" style="margin-top:0">Roll before you can do anything else.</p>'}
-          <button class="btn" data-a="roll">Roll the die</button>
+          <button class="btn" data-a="roll">Roll the dice</button>
           ${passTo?(me.passCooldown>0
             ?'<p class="note" style="margin:10px 0 0;color:var(--signal)">You used the secret passage last turn. It\'s closed to you until your next one.</p>'
             :'<button class="btn ghost" data-a="pass" data-v="'+esc(passTo)+'">Take the secret passage to the '+esc(passTo)+'</button>'):''}
@@ -735,8 +742,8 @@ function table(){
         const n=go?(Object.keys(go.cells).length+Object.keys(go.rooms).length):0;
         moveBlock=`<div class="card">
           <div class="eyebrow">You rolled</div>
-          <div class="dice"><span class="die">${PIPS[ts.d1]||""}</span>
-            <span class="big" style="margin:0">${ts.roll} ${ts.roll===1?"step":"steps"}</span></div>
+          <div class="dice"><span class="die">${PIPS[ts.d1]||""}</span><span class="die">${PIPS[ts.d2]||""}</span>
+            <span class="big" style="margin:0">${ts.roll} steps</span></div>
           <p class="note" style="margin:0">Tap any glowing square or room — up to ${ts.roll} steps. ${n?"":"Nowhere to go; end your turn."}</p>
           ${n?"":'<button class="btn ghost" data-a="endturn" style="margin-top:12px">End turn</button>'}
         </div>`;
@@ -755,7 +762,7 @@ function table(){
     ${g.board&&me.char?'<p class="note" style="margin-bottom:0">'+
       (me.char===me.name?'You':'You\'re playing '+esc(me.char))+
       ' &middot; '+(roomOf(me)?'in the <b style="color:var(--chart)">'+esc(roomOf(me))+'</b>':'out on the boardwalk, between rooms')+'</p>':""}
-    ${me.out?'<p class="note" style="color:var(--signal);margin-bottom:0">You accused wrong. You still show cards, but your turns are over.</p>':""}
+    ${me.out?'<p class="note" style="color:var(--signal);margin-bottom:0">You\'re out. Your hand is face up, so the table can read it instead of asking you.</p>':""}
   </div>
   ${boardBlock}
   ${moveBlock}
@@ -778,7 +785,7 @@ function table(){
         :"Walk to the room you're naming and say it out loud, then tap."}</p>
       <button class="btn" data-a="ask" ${askable?"":"disabled"}>Ask the table</button>
       ${g.board&&TS(g).moved===true?'<button class="btn ghost" data-a="endturn">End turn without asking</button>':""}`:`
-      <p class="note" style="color:var(--signal)">Right and you win outright. Wrong and you're out — still showing cards, never winning.</p>
+      <p class="note" style="color:var(--signal)">Right and you win outright. Wrong and you're out — and your hand is turned face up for everyone.</p>
       ${S.confirm
         ?'<button class="btn signal" data-a="accuse">Lock it in — '+esc(S.pick.s)+", "+esc(S.pick.r)+", "+esc(S.pick.w)+'</button>'
         :'<button class="btn ghost" data-a="confirm">Make the accusation</button>'}
@@ -795,15 +802,25 @@ function notepad(){
   const g=S.game, me=byId(g,myId());
   if(!me) return "";
   const n=notesFor(me.id);
+  /* cards nobody has to guess about any more */
+  const known={};
+  (me.hand||[]).forEach(c=>{ known[c]="IN HAND"; });
+  g.players.forEach(p=>{
+    if(!p.revealed||p.id===me.id) return;
+    (p.hand||[]).forEach(c=>{ if(!known[c]) known[c]=(p.name||"?").split(" ")[0].toUpperCase(); });
+  });
+  const anyRevealed=g.players.some(p=>p.revealed&&p.id!==me.id);
   const group=(title,list)=>'<div style="margin-bottom:20px"><div class="eyebrow">'+title+'</div>'+
     list.map(c=>{
-      const mine=me.hand.includes(c);
-      const st=mine?1:(n[c]||0);
-      const tag=mine?"IN HAND":st===1?"OUT":st===2?"SUSPECT":"";
-      return '<div class="noteline" data-state="'+st+'" '+(mine?"":'data-a="mark" data-v="'+esc(c)+'"')+'>'+
-        '<span>'+esc(c)+'</span><span class="tag" data-state="'+st+'">'+tag+'</span></div>';
+      const fixed=known[c];
+      const st=fixed?1:(n[c]||0);
+      const tag=fixed?fixed:(st===1?"OUT":st===2?"SUSPECT":"");
+      return '<div class="noteline" data-state="'+st+'" '+(fixed?"":'data-a="mark" data-v="'+esc(c)+'"')+'>'+
+        '<span>'+esc(c)+'</span><span class="tag" data-state="'+st+'">'+esc(tag)+'</span></div>';
     }).join("")+'</div>';
-  return '<p class="note" style="margin-top:0">Tap a line to cycle it: blank, ruled out, prime suspect. Your own cards are struck out already. This is yours alone.</p>'+
+  return '<p class="note" style="margin-top:0">Tap a line to cycle it: blank, ruled out, prime suspect. '+
+    'Cards get struck out on their own once you\'ve been shown them'+
+    (anyRevealed?", and anything held by a player who\u2019s out is marked with their name":"")+'.</p>'+
     group("Suspects",g.setup.suspects)+group("Weapons",g.setup.weapons)+group("Rooms",g.setup.rooms);
 }
 
@@ -812,10 +829,13 @@ function logView(){
   if(!g.log||!g.log.length) return '<p class="note">Nothing yet.</p>';
   return '<div class="eyebrow">The record — everything said out loud</div>'+g.log.map(e=>{
     if(e.t==="start") return '<div class="card"><p class="note" style="margin:0">Cards dealt. Turn order: '+(e.names||[]).map(esc).join(" → ")+'</p></div>';
-    if(e.t==="left") return '<div class="card"><p class="note" style="margin:0">'+esc(e.byName)+' left the game. Their cards still answer suggestions.</p></div>';
+    if(e.t==="left") return '<div class="card"><p class="note" style="margin:0">'+esc(e.byName)+' left the game.</p></div>';
+    if(e.t==="reveal") return '<div class="card"><div style="font-size:15px;line-height:1.5">'+esc(e.byName)+' '+esc(e.why)+
+      ' \u2014 their hand is now open to everyone.</div><div class="chips">'+
+      ((e.cards&&e.cards.length)?e.cards.map(c=>'<span class="chip">'+esc(c)+'</span>').join(""):'<span class="note">No cards.</span>')+'</div></div>';
     if(e.t==="accuse") return '<div class="card"><div style="font-size:15px;line-height:1.5;color:'+(e.right?"var(--brass)":"var(--signal)")+'">'+
       esc(e.byName)+" accused "+esc(e.suggestion.suspect)+", "+esc(e.suggestion.room)+", "+esc(e.suggestion.weapon)+" — "+(e.right?"correct":"wrong, and out")+".</div></div>";
-    const sees=e.by===meId||e.disproverId===meId;
+    const sees=e.open===true||e.by===meId||e.disproverId===meId;
     const passers=e.passerNames||[];
     return '<div class="card">'+
       '<div style="font-size:15px;line-height:1.5">'+esc(e.byName)+" asked: "+esc(e.suggestion.suspect)+", in the "+esc(e.suggestion.room)+", with the "+esc(e.suggestion.weapon)+'.</div>'+
@@ -936,8 +956,8 @@ document.addEventListener("click",async ev=>{
     await mutate(gm=>{
       if(gm.order[gm.turn]!==meId) return;
       const t=TS(gm); if(t.roll||t.moved) return;
-      const d1=d6();
-      gm.ts={roll:d1,d1:d1,moved:false};
+      const d1=d6(), d2=d6();
+      gm.ts={roll:d1+d2,d1:d1,d2:d2,moved:false};
     });
     return;
   }
@@ -1002,13 +1022,14 @@ document.addEventListener("click",async ev=>{
         const target=gm.players.find(x=>x.char===sug.suspect);
         if(target&&target.id!==meId){ target.pos={room:sug.room}; target.pulled=true; }
       }
-      /* a player who walked can't tap, so their hand answers automatically */
-      let auto=null;
+      /* a revealed hand is public knowledge, so it answers openly and instantly */
+      let auto=null, open=false;
       if(disproverId){
         const dp=byId(gm,disproverId);
-        if(dp&&dp.left) auto=matches[0];
+        if(dp&&dp.revealed){ auto=matches[0]; open=true; }
       }
-      gm.pending={by:meId,suggestion:sug,passers:passers,disproverId:disproverId,matches:matches,card:auto};
+      gm.pending={by:meId,suggestion:sug,passers:passers,disproverId:disproverId,
+        matches:matches,card:auto,open:open};
     });
     if(!ok&&!S.err) S.err="You can't ask from here.";
     if(ok&&S.mode==="local") S.viewer=null;
@@ -1020,13 +1041,15 @@ document.addEventListener("click",async ev=>{
     render(); return;
   }
   if(a==="closeAsk"){
+    const pend=g.pending, meId0=myId();
+    if(pend&&pend.card&&pend.by===meId0&&meId0) notesFor(meId0)[pend.card]=1;
     const ok=await mutate(gm=>{
       const p=gm.pending; if(!p) return;
       gm.log.unshift({t:"ask",by:p.by,byName:(byId(gm,p.by)||{}).name||"Someone",suggestion:p.suggestion,
         passerNames:(p.passers||[]).map(id=>(byId(gm,id)||{}).name||"?"),
         disproverId:p.disproverId||null,
         disproverName:p.disproverId?((byId(gm,p.disproverId)||{}).name||"?"):null,
-        card:p.card||null});
+        card:p.card||null,open:p.open===true});
       gm.pending=null; advance(gm);
     });
     if(ok&&S.mode==="local") S.viewer=null;
@@ -1040,7 +1063,7 @@ document.addEventListener("click",async ev=>{
       const right = sug.suspect===gm.solution.suspect&&sug.weapon===gm.solution.weapon&&sug.room===gm.solution.room;
       gm.log.unshift({t:"accuse",by:meId,byName:p.name,suggestion:sug,right:right});
       if(right){ gm.phase="over"; gm.winner=p.name; }
-      else{ p.out=true; advance(gm); }
+      else{ p.out=true; revealHand(gm,p,"accused wrong"); advance(gm); }
     });
     S.confirm=false;
     if(ok&&S.mode==="local") S.viewer=null;
