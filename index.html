@@ -60,7 +60,8 @@
   .tag{font-family:var(--mono);font-size:11px;letter-spacing:.15em;color:var(--brass-dim)}
   .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
   .chip{border:1px solid var(--brass);color:var(--brass);padding:6px 10px;font-size:14px;border-radius:2px}
-  .err{border:1px solid var(--signal);background:rgba(176,70,60,.14);color:#F0C9C4;padding:11px 13px;font-size:14px;border-radius:2px;margin:14px 0}
+  .err{border:1px solid var(--signal);background:rgba(176,70,60,.14);color:#F0C9C4;padding:11px 13px;font-size:14px;border-radius:2px;margin:14px 0;line-height:1.5}
+  .ok{border:1px solid var(--brass);background:rgba(201,162,39,.12);color:var(--brass);padding:11px 13px;font-size:14px;border-radius:2px;margin:14px 0;line-height:1.5}
   .big{font-family:var(--display);font-size:26px;line-height:1.2;margin:6px 0 0}
   .huge{font-family:var(--display);font-size:34px;line-height:1.2;margin:14px 0 18px;color:var(--brass)}
   .huge.miss{color:var(--signal)}
@@ -71,6 +72,10 @@
   .noteline .tag[data-state="2"]{color:var(--signal)}
   .lock{text-align:center;padding:46px 18px;border:2px solid var(--brass);background:rgba(201,162,39,.06);border-radius:2px}
   .lock .who{font-family:var(--display);font-size:38px;line-height:1.1;margin:12px 0 6px}
+  .footer{margin-top:30px;padding-top:16px;border-top:1px solid rgba(201,162,39,.16);
+    display:flex;justify-content:space-between;align-items:center}
+  .footer button{background:transparent;border:none;color:var(--chart-dim);font-family:var(--mono);
+    font-size:11px;letter-spacing:.16em;text-transform:uppercase;padding:4px 0}
   @media (prefers-reduced-motion:no-preference){
     .card,.plate,.lock{animation:rise .28s ease-out both}
     @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -83,27 +88,18 @@
 <script>
 /* ============================================================
    THE SHIP'S MANIFEST — real-life Clue, dealt by the phone.
-   Single file. Drop it in a GitHub repo, turn on Pages, done.
+   Single file. Drop in a GitHub repo, turn on Pages, done.
 
-   ONLINE MODE (optional):
-   Paste a Firebase Realtime Database URL below and every phone
-   syncs. Leave it blank and only pass-and-play is offered.
-
-   To get one, free, in about five minutes:
-     1. console.firebase.google.com — create a project
-     2. Build > Realtime Database > Create database
-     3. Start in TEST MODE (open read/write). Anyone with the
-        URL can read the data, so don't reuse it for anything
-        that matters.
-     4. Copy the URL it shows you, ending in .firebaseio.com
-        or .firebasedatabase.app, and paste it below.
+   Paste your Firebase Realtime Database URL below. No trailing
+   slash. Nothing else to configure — this talks to Firebase
+   over plain REST, so there's no SDK and no app registration.
    ============================================================ */
 const DB_URL = "https://boat-clue-default-rtdb.firebaseio.com/";
 
 /* ---------------- defaults ---------------- */
 const DEFAULTS = {
   suspects:["The Captain","The Deckhand","The Heiress","The Chef","The Stowaway","The Harbormaster","The Diver","The Widow"],
-  weapons:["Anchor chain","Flare gun","Fillet knife","Mooring rope","Champagne bottle","Fire extinguisher","Boat hook","Winch handle"],
+  weapons:["Anchor chain","Fillet knife","Mooring rope","Champagne bottle","Fire extinguisher","Boat hook","Winch handle","Ice pick"],
   rooms:["Bow","Stern","Galley","Head","Cabin","Flybridge","Engine room","Swim platform"]
 };
 
@@ -122,9 +118,9 @@ const S={
   me:null,        // online: {id,name}
   viewer:null,    // pass-and-play: whose eyes are on the phone
   game:null,
-  tab:"play", turnMode:"ask", confirm:false, err:"",
-  nameIn:"", codeIn:"", localNames:[], draft:clone(DEFAULTS),
-  pick:{}, notes:{}, busy:false
+  tab:"play", turnMode:"ask", confirm:false, err:"", ok:"",
+  nameIn:"", codeIn:"",
+  pick:{}, notes:{}, busy:false, lastSync:""
 };
 
 /* ---------------- persistence ---------------- */
@@ -139,66 +135,96 @@ function clearLocal(){try{localStorage.removeItem(LS)}catch(e){}}
 
 /* ---------------- network ---------------- */
 const netOn=()=>!!DB_URL;
-const url=c=>`${DB_URL.replace(/\/$/,"")}/games/${c}.json`;
+const url=c=>DB_URL.replace(/\/+$/,"")+"/games/"+encodeURIComponent(c)+".json";
+
 async function netGet(c){
-  const r=await fetch(url(c),{cache:"no-store"});
-  if(!r.ok) throw new Error("fetch");
+  const r=await fetch(url(c)+"?t="+Date.now(),{cache:"no-store"});
+  if(!r.ok) throw new Error(r.status===401||r.status===403?"permission denied, check your database Rules":"HTTP "+r.status);
   const j=await r.json();
-  return j?JSON.parse(j):null;
+  if(j===null||j===undefined) return null;
+  if(typeof j!=="string") throw new Error("that record isn't a game");
+  return JSON.parse(j);
 }
 async function netPut(g){
-  const r=await fetch(url(g.code),{method:"PUT",body:JSON.stringify(JSON.stringify(g))});
-  if(!r.ok) throw new Error("put");
+  const r=await fetch(url(g.code),{
+    method:"PUT",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(JSON.stringify(g))
+  });
+  if(!r.ok) throw new Error(r.status===401||r.status===403?"permission denied, check your database Rules":"HTTP "+r.status);
 }
 
 /* apply a change to the game, wherever it lives */
-async function mutate(fn){
-  if(S.mode==="local"){ fn(S.game); saveLocal(); render(); return; }
+async function mutate(fn,opts){
+  opts=opts||{};
+  if(S.mode==="local"){
+    fn(S.game); S.lastSync=JSON.stringify(S.game);
+    saveLocal(); if(!opts.quiet) render();
+    return true;
+  }
+  if(S.busy) return false;
   S.busy=true;
+  let good=false;
   try{
     const g=await netGet(S.code);
-    if(!g) throw new Error("gone");
+    if(!g) throw new Error("that game is no longer on the database");
     fn(g);
     await netPut(g);
-    S.game=g; S.err="";
-  }catch(e){ S.err="Lost the connection. Check your signal and try that again."; }
-  S.busy=false; saveLocal(); render();
+    S.game=g; S.lastSync=JSON.stringify(g); S.err=""; good=true;
+  }catch(e){
+    S.err="Couldn't save that — "+e.message+".";
+  }
+  S.busy=false; saveLocal();
+  if(!opts.quiet||!good) render();
+  return good;
+}
+
+/* don't yank the screen out from under someone who's typing */
+function typing(){
+  const a=document.activeElement;
+  return !!a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
 }
 
 let poller=null;
 function startPolling(){
   stopPolling();
   poller=setInterval(async()=>{
-    if(S.busy||S.mode!=="online") return;
-    try{ const g=await netGet(S.code); if(g){ S.game=g; S.err=""; render(); } }catch(e){}
+    if(S.busy||S.mode!=="online"||!S.code) return;
+    try{
+      const g=await netGet(S.code);
+      if(!g) return;
+      const sig=JSON.stringify(g);
+      S.game=g;
+      if(sig!==S.lastSync){ S.lastSync=sig; S.err=""; if(!typing()) render(); }
+    }catch(e){}
   },2500);
 }
 function stopPolling(){ if(poller) clearInterval(poller); poller=null; }
 
 /* ---------------- game logic ---------------- */
 function makeGame(code,players){
-  return{code,phase:"lobby",hostId:players[0].id,players,setup:clone(DEFAULTS),
-    order:[],turn:0,pending:null,log:[],solution:null,winner:null};
+  return{code:code,phase:"lobby",hostId:players.length?players[0].id:null,players:players,
+    setup:clone(DEFAULTS),order:[],turn:0,pending:null,log:[],solution:null,winner:null};
 }
 function setupProblems(g){
-  const all=[...g.setup.suspects,...g.setup.weapons,...g.setup.rooms];
+  const all=[].concat(g.setup.suspects,g.setup.weapons,g.setup.rooms);
   const dup=all.find((c,i)=>all.indexOf(c)!==i);
   const out=[];
-  if(g.players.length<2) out.push("You need at least two players.");
-  ["suspects","weapons","rooms"].forEach(k=>{ if(g.setup[k].length<3) out.push(`Add at least three ${k}.`); });
-  if(dup) out.push(`Every name has to be different — “${dup}” appears twice.`);
+  if(g.players.length<2) out.push("Waiting on at least one more player before you can deal.");
+  ["suspects","weapons","rooms"].forEach(k=>{ if(g.setup[k].length<3) out.push("Add at least three "+k+"."); });
+  if(dup) out.push('Every name has to be different — "'+dup+'" appears twice.');
   if(all.length-3<g.players.length) out.push("Not enough cards to give everyone one. Add more.");
   return out;
 }
 function deal(g){
   const pick=a=>a[Math.floor(Math.random()*a.length)];
   const sol={suspect:pick(g.setup.suspects),weapon:pick(g.setup.weapons),room:pick(g.setup.rooms)};
-  const deck=shuffle([...g.setup.suspects,...g.setup.weapons,...g.setup.rooms]
+  const deck=shuffle([].concat(g.setup.suspects,g.setup.weapons,g.setup.rooms)
     .filter(c=>c!==sol.suspect&&c!==sol.weapon&&c!==sol.room));
   g.order=shuffle(g.players.map(p=>p.id));
   g.players.forEach(p=>{p.hand=[];p.out=false;});
   deck.forEach((c,i)=>byId(g,g.order[i%g.order.length]).hand.push(c));
-  g.solution=sol; g.phase="playing"; g.turn=0; g.pending=null;
+  g.solution=sol; g.phase="playing"; g.turn=0; g.pending=null; g.winner=null;
   g.log=[{t:"start",names:g.order.map(id=>byId(g,id).name)}];
 }
 function advance(g){
@@ -211,23 +237,32 @@ function advance(g){
 /* who the phone is waiting on right now */
 function actorId(g){
   const p=g.pending;
-  if(p){ if(p.disproverId&&!p.card) return p.disproverId; return p.by; }
+  if(p) return (p.disproverId&&!p.card)?p.disproverId:p.by;
   return g.order[g.turn];
 }
-/* in pass-and-play, notes belong to whoever's holding it */
-const myId=()=>S.mode==="local"?S.viewer:S.me.id;
+const myId=()=>S.mode==="local"?S.viewer:(S.me?S.me.id:null);
 const notesFor=id=>(S.notes[id]=S.notes[id]||{});
+
+/* keep the three dropdowns pointing at cards that still exist */
+function syncPick(g){
+  const map={s:"suspects",w:"weapons",r:"rooms"};
+  for(const k in map){
+    if(!g.setup[map[k]].includes(S.pick[k])){ S.pick[k]=g.setup[map[k]][0]; S.confirm=false; }
+  }
+}
 
 /* ============================================================
    RENDER
    ============================================================ */
 const app=document.getElementById("app");
 function render(){ app.innerHTML=view(); }
-const errBar=()=>S.err?`<div class="err">${esc(S.err)}</div>`:"";
+const errBar=()=>S.err?'<div class="err">'+esc(S.err)+'</div>':"";
+const okBar=()=>S.ok?'<div class="ok">'+esc(S.ok)+'</div>':"";
 
 function view(){
   if(S.screen==="home") return home();
-  if(!S.game) return `<p class="note">Loading the manifest…</p>`;
+  if(!S.game) return '<p class="note">Reaching the database…</p>'+
+    '<button class="btn ghost" data-a="reset">Back to the start</button>';
   if(S.game.phase==="lobby") return lobby();
   return game();
 }
@@ -241,108 +276,130 @@ function home(){
     <p class="lede">A murder, dealt to your phones. Everyone holds a few cards. Nobody holds the answer — not even the host.</p>
   </div>
 
-  <div class="card">
-    <div class="eyebrow">One phone, passed around</div>
-    <p class="note" style="margin-top:0">Works with no signal at all. Each player taps their name to see their hand, then passes it on.</p>
-    <button class="btn" data-a="localSetup">Play on this phone</button>
-  </div>
-
   ${netOn()?`
-  <div class="rule"></div>
   <div class="card">
     <div class="eyebrow">Everyone on their own phone</div>
     <label><div class="eyebrow">Your name</div>
-      <input id="nameIn" value="${esc(S.nameIn)}" maxlength="18" placeholder="How you'll show up to everyone"></label>
+      <input id="nameIn" value="${esc(S.nameIn)}" maxlength="18" placeholder="How you'll show up to everyone" autocomplete="off"></label>
     <button class="btn" data-a="create">Start a new game</button>
     <label style="margin-top:14px"><div class="eyebrow">Join code</div>
-      <input id="codeIn" class="code" value="${esc(S.codeIn)}" maxlength="4" placeholder="ABCD" autocapitalize="characters"></label>
+      <input id="codeIn" class="code" value="${esc(S.codeIn)}" maxlength="4" placeholder="ABCD" autocapitalize="characters" autocomplete="off"></label>
     <button class="btn ghost" data-a="join">Join a game</button>
-  </div>`:`
-  <p class="note">To let everyone use their own phone, open this file and paste a Firebase database URL into <code style="font-family:var(--mono)">DB_URL</code> at the top. Instructions are in the comment right above it.</p>`}
+  </div>
+  <button class="btn ghost" data-a="ping">Test the database connection</button>`
+  :`<div class="err">No database URL set. Open index.html and paste your Firebase URL into <span style="font-family:var(--mono)">DB_URL</span> near the top of the script. Until then only the one-phone game works.</div>`}
 
-  ${errBar()}`;
+  <div class="rule"></div>
+  <div class="card">
+    <div class="eyebrow">One phone, passed around</div>
+    <p class="note" style="margin-top:0">Works with no signal at all. Each player taps their name to see their hand, then passes it on.</p>
+    <button class="btn ghost" data-a="localSetup">Play on this phone</button>
+  </div>
+
+  ${okBar()}${errBar()}`;
 }
 
 /* ---------- lobby ---------- */
 function lobby(){
   const g=S.game;
-  const isHost=S.mode==="local"||g.hostId===S.me.id;
+  const isHost = S.mode==="local" || (S.me && g.hostId===S.me.id);
   const probs=setupProblems(g);
   return `
-  ${S.mode==="online"?`<div class="plate"><div class="eyebrow">Read this out to the table</div><div class="code">${g.code}</div></div>`:""}
+  ${S.mode==="online"?`<div class="plate"><div class="eyebrow">Read this out to the table</div><div class="code">${esc(g.code)}</div></div>`:""}
   <div class="eyebrow" style="margin-top:26px">Aboard — ${g.players.length} of 8</div>
   <div class="card">
-    ${g.players.map(p=>`<div class="row"><span>${esc(p.name)}</span>
-      <span class="tag">${p.id===g.hostId&&S.mode==="online"?"HOST ":""}${S.mode==="online"&&p.id===S.me.id?"YOU":""}</span></div>`).join("")}
+    ${g.players.length?g.players.map(p=>`<div class="row"><span>${esc(p.name)}</span>
+      <span class="tag">${(S.mode==="online"&&p.id===g.hostId)?"HOST ":""}${(S.mode==="online"&&S.me&&p.id===S.me.id)?"YOU":""}</span></div>`).join("")
+      :'<p class="note" style="margin:0">Nobody yet.</p>'}
   </div>
 
   ${S.mode==="local"?`
-  <label><div class="eyebrow">Add a player</div><input id="addName" maxlength="18" placeholder="Name"></label>
+  <label><div class="eyebrow">Add a player</div><input id="addName" maxlength="18" placeholder="Name" autocomplete="off"></label>
   <button class="btn ghost" data-a="addPlayer">Add to the table</button>`:""}
 
   ${isHost?`
   <div class="rule"></div>
   <div class="eyebrow">The deck — one per line</div>
-  <p class="note" style="margin-top:0">Swap these for real people and real places around you. Rooms should be spots someone can actually stand in — that's the whole point of playing it live.</p>
+  <p class="note" style="margin-top:0">Swap these for real people and real places around you. Rooms should be spots someone can actually stand in — that's the whole point of playing it live. Tap away from a box to save it.</p>
   ${["suspects","weapons","rooms"].map(k=>`
     <div style="margin-bottom:14px">
       <div class="eyebrow">${k}</div>
       <textarea data-list="${k}" rows="${Math.max(4,g.setup[k].length)}">${esc(g.setup[k].join("\n"))}</textarea>
     </div>`).join("")}
-  ${probs.length?`<div class="err">${esc(probs[0])}</div>`:""}
+  ${probs.length?'<div class="err">'+esc(probs[0])+'</div>':""}
   <button class="btn" data-a="deal" ${probs.length?"disabled":""}>Deal the cards</button>
-  `:`<p class="note">Waiting for the host to deal. This updates on its own.</p>`}
-  ${errBar()}`;
+  `:'<p class="note">Waiting for the host to deal. This updates on its own.</p>'}
+  ${errBar()}
+  ${footer()}`;
+}
+
+function footer(){
+  return `<div class="footer">
+    <span class="tag">${S.mode==="online"?"CODE "+esc(S.code):"ONE PHONE"}</span>
+    <button data-a="leave">Leave game</button>
+  </div>`;
 }
 
 /* ---------- game ---------- */
 function game(){
   const g=S.game;
+
+  if(S.mode==="online"&&(!S.me||!byId(g,S.me.id)))
+    return '<div class="err">You\'re not in this game any more. The host may have restarted it.</div>'+
+      '<button class="btn ghost" data-a="reset">Back to the start</button>';
+
   if(S.mode==="local"&&g.phase!=="over"&&S.viewer!==actorId(g)){
     const who=byId(g,actorId(g));
+    if(!who) return '<div class="err">Lost track of whose turn it is.</div><button class="btn ghost" data-a="reset">Back to the start</button>';
     return `<div class="lock">
       <div class="eyebrow">Hand the phone to</div>
       <div class="who">${esc(who.name)}</div>
       <p class="note" style="margin-bottom:22px">Everyone else, eyes up.</p>
       <button class="btn" data-a="unlock">I'm ${esc(who.name)}</button>
-    </div>`;
+    </div>${footer()}`;
   }
+
   const tabs=[["play","Table"],["notes","Notepad"],["log","Record"]];
   return `
-  <div class="tabs">${tabs.map(([k,l])=>`<button data-a="tab" data-v="${k}" aria-selected="${S.tab===k}">${l}</button>`).join("")}</div>
+  <div class="tabs">${tabs.map(t=>`<button data-a="tab" data-v="${t[0]}" aria-selected="${S.tab===t[0]}">${t[1]}</button>`).join("")}</div>
   ${S.tab==="play"?table():S.tab==="notes"?notepad():logView()}
-  ${errBar()}`;
+  ${errBar()}
+  ${footer()}`;
 }
 
 function hand(){
   const me=byId(S.game,myId());
+  if(!me) return "";
   return `<div class="card"><div class="eyebrow">Your hand — nobody else sees this</div>
-    <div class="chips">${me.hand.map(c=>`<span class="chip">${esc(c)}</span>`).join("")}</div></div>`;
+    <div class="chips">${me.hand.length?me.hand.map(c=>'<span class="chip">'+esc(c)+'</span>').join("")
+      :'<span class="note">No cards. Everything else is in play.</span>'}</div></div>`;
 }
 
 function table(){
   const g=S.game, p=g.pending, meId=myId(), me=byId(g,meId);
+  if(!me) return '<div class="err">Couldn\'t find your seat at this table.</div>';
 
   if(g.phase==="over"){
+    const isHost = S.mode==="local" || g.hostId===meId;
     return `<div class="card" style="padding:22px">
       <div class="eyebrow">Case closed</div>
       <div class="big" style="font-size:30px;margin-bottom:16px">${g.winner==="nobody"?"Everyone guessed wrong.":esc(g.winner)+" solved it."}</div>
       <div style="font-size:17px;color:var(--brass);line-height:1.7">
         ${esc(g.solution.suspect)}<br>in the ${esc(g.solution.room)}<br>with the ${esc(g.solution.weapon)}</div>
     </div>
-    <button class="btn ghost" data-a="reset">Back to the start</button>`;
+    ${isHost?'<button class="btn" data-a="again">Deal a new round, same players</button>':'<p class="note">Waiting on the host to deal again.</p>'}`;
   }
 
   if(p){
     const asker=byId(g,p.by), dis=p.disproverId?byId(g,p.disproverId):null;
-    const line=`${esc(p.suggestion.suspect)}, in the ${esc(p.suggestion.room)}, with the ${esc(p.suggestion.weapon)}`;
+    const line=esc(p.suggestion.suspect)+", in the "+esc(p.suggestion.room)+", with the "+esc(p.suggestion.weapon);
 
     if(dis&&!p.card&&dis.id===meId){
       return `<div class="card" style="padding:22px">
         <div class="eyebrow">You must disprove</div>
         <div class="big" style="font-size:24px;margin-bottom:6px">${line}</div>
         <p class="note" style="margin-bottom:18px">${esc(asker.name)} asked. Show one card — only ${esc(asker.name)} sees it.</p>
-        ${p.matches.map(c=>`<button class="btn" data-a="show" data-v="${esc(c)}">Show ${esc(c)}</button>`).join("")}
+        ${(p.matches||[]).map(c=>'<button class="btn" data-a="show" data-v="'+esc(c)+'">Show '+esc(c)+'</button>').join("")}
       </div>`;
     }
     if(p.by===meId&&(p.card||!dis)){
@@ -358,21 +415,21 @@ function table(){
     return `<div class="card" style="padding:22px">
       <div class="eyebrow">In progress</div>
       <div class="big" style="font-size:23px;margin-bottom:12px">${line}</div>
-      <p class="note">Asked by ${esc(asker.name)}. ${dis?"Waiting on "+esc(dis.name)+" to show a card.":"Waiting on "+esc(asker.name)+"."}</p>
+      <p class="note">Asked by ${esc(asker?asker.name:"someone")}. ${dis?"Waiting on "+esc(dis.name)+" to show a card.":"Waiting on "+esc(asker?asker.name:"them")+"."}</p>
     </div>${hand()}`;
   }
 
   const cur=byId(g,g.order[g.turn]);
-  const myTurn=cur.id===meId;
-  if(!S.pick.s){ S.pick={s:g.setup.suspects[0],w:g.setup.weapons[0],r:g.setup.rooms[0]}; }
+  const myTurn = !!cur && cur.id===meId && !me.out;
+  syncPick(g);
   const sel=(label,k,opts)=>`<div style="margin-bottom:12px"><div class="eyebrow">${label}</div>
-    <select data-pick="${k}">${opts.map(o=>`<option ${S.pick[k]===o?"selected":""}>${esc(o)}</option>`).join("")}</select></div>`;
+    <select data-pick="${k}">${opts.map(o=>'<option value="'+esc(o)+'"'+(S.pick[k]===o?" selected":"")+'>'+esc(o)+'</option>').join("")}</select></div>`;
 
   return `
   <div class="card">
     <div class="eyebrow">Now playing</div>
-    <div class="big" style="${myTurn?"color:var(--brass)":""}">${myTurn?"Your turn":esc(cur.name)+"'s turn"}</div>
-    ${me.out?`<p class="note" style="color:var(--signal);margin-bottom:0">You accused wrong. You still show cards, but your turns are over.</p>`:""}
+    <div class="big" style="${myTurn?"color:var(--brass)":""}">${myTurn?"Your turn":esc(cur?cur.name:"—")+"'s turn"}</div>
+    ${me.out?'<p class="note" style="color:var(--signal);margin-bottom:0">You accused wrong. You still show cards, but your turns are over.</p>':""}
   </div>
   ${hand()}
   ${myTurn?`
@@ -389,37 +446,40 @@ function table(){
       <button class="btn" data-a="ask">Ask the table</button>`:`
       <p class="note" style="color:var(--signal)">Right and you win outright. Wrong and you're out — still showing cards, never winning.</p>
       ${S.confirm
-        ?`<button class="btn signal" data-a="accuse">Lock it in — ${esc(S.pick.s)}, ${esc(S.pick.r)}, ${esc(S.pick.w)}</button>`
-        :`<button class="btn ghost" data-a="confirm">Make the accusation</button>`}`}
+        ?'<button class="btn signal" data-a="accuse">Lock it in — '+esc(S.pick.s)+", "+esc(S.pick.r)+", "+esc(S.pick.w)+'</button>'
+        :'<button class="btn ghost" data-a="confirm">Make the accusation</button>'}`}
   </div>`:""}`;
 }
 
 function notepad(){
-  const g=S.game, me=byId(g,myId()), n=notesFor(me.id);
+  const g=S.game, me=byId(g,myId());
+  if(!me) return "";
+  const n=notesFor(me.id);
   const group=(title,list)=>`<div style="margin-bottom:20px"><div class="eyebrow">${title}</div>
     ${list.map(c=>{
       const mine=me.hand.includes(c);
       const st=mine?1:(n[c]||0);
       const tag=mine?"IN HAND":st===1?"OUT":st===2?"SUSPECT":"";
-      return `<div class="noteline" data-state="${st}" ${mine?"":`data-a="mark" data-v="${esc(c)}"`}>
-        <span>${esc(c)}</span><span class="tag" data-state="${st}">${tag}</span></div>`;
+      return '<div class="noteline" data-state="'+st+'" '+(mine?"":'data-a="mark" data-v="'+esc(c)+'"')+'>'+
+        '<span>'+esc(c)+'</span><span class="tag" data-state="'+st+'">'+tag+'</span></div>';
     }).join("")}</div>`;
-  return `<p class="note" style="margin-top:0">Tap a line to cycle it: blank, ruled out, prime suspect. Your own cards are struck out already. This is yours alone.</p>
-    ${group("Suspects",g.setup.suspects)}${group("Weapons",g.setup.weapons)}${group("Rooms",g.setup.rooms)}`;
+  return '<p class="note" style="margin-top:0">Tap a line to cycle it: blank, ruled out, prime suspect. Your own cards are struck out already. This is yours alone.</p>'+
+    group("Suspects",g.setup.suspects)+group("Weapons",g.setup.weapons)+group("Rooms",g.setup.rooms);
 }
 
 function logView(){
   const g=S.game, meId=myId();
-  if(!g.log.length) return `<p class="note">Nothing yet.</p>`;
-  return `<div class="eyebrow">The record — everything said out loud</div>` + g.log.map(e=>{
-    if(e.t==="start") return `<div class="card"><p class="note" style="margin:0">Cards dealt. Turn order: ${e.names.map(esc).join(" → ")}</p></div>`;
-    if(e.t==="accuse") return `<div class="card"><div style="font-size:15px;color:${e.right?"var(--brass)":"var(--signal)"}">
-      ${esc(e.byName)} accused ${esc(e.suggestion.suspect)}, ${esc(e.suggestion.room)}, ${esc(e.suggestion.weapon)} — ${e.right?"correct":"wrong, and out"}.</div></div>`;
-    const sees=e.by===meId||e.disproverId===meId;
-    return `<div class="card">
-      <div style="font-size:15px;line-height:1.5">${esc(e.byName)} asked: ${esc(e.suggestion.suspect)}, in the ${esc(e.suggestion.room)}, with the ${esc(e.suggestion.weapon)}.</div>
-      <p class="note" style="margin:7px 0 0">${e.passerNames.length?esc(e.passerNames.join(", "))+" couldn't disprove. ":""}${
-        e.disproverName?esc(e.disproverName)+" showed a card"+(sees?" — "+esc(e.card):"")+".":"Nobody could disprove it."}</p></div>`;
+  if(!g.log||!g.log.length) return '<p class="note">Nothing yet.</p>';
+  return '<div class="eyebrow">The record — everything said out loud</div>' + g.log.map(e=>{
+    if(e.t==="start") return '<div class="card"><p class="note" style="margin:0">Cards dealt. Turn order: '+(e.names||[]).map(esc).join(" → ")+'</p></div>';
+    if(e.t==="accuse") return '<div class="card"><div style="font-size:15px;line-height:1.5;color:'+(e.right?"var(--brass)":"var(--signal)")+'">'+
+      esc(e.byName)+" accused "+esc(e.suggestion.suspect)+", "+esc(e.suggestion.room)+", "+esc(e.suggestion.weapon)+" — "+(e.right?"correct":"wrong, and out")+".</div></div>";
+    const sees = e.by===meId || e.disproverId===meId;
+    const passers = e.passerNames||[];
+    return '<div class="card">'+
+      '<div style="font-size:15px;line-height:1.5">'+esc(e.byName)+" asked: "+esc(e.suggestion.suspect)+", in the "+esc(e.suggestion.room)+", with the "+esc(e.suggestion.weapon)+'.</div>'+
+      '<p class="note" style="margin:7px 0 0">'+(passers.length?esc(passers.join(", "))+" couldn't disprove. ":"")+
+      (e.disproverName?esc(e.disproverName)+" showed a card"+((sees&&e.card)?" — "+esc(e.card):"")+".":"Nobody could disprove it.")+'</p></div>';
   }).join("");
 }
 
@@ -430,104 +490,147 @@ document.addEventListener("click",async ev=>{
   const el=ev.target.closest("[data-a]"); if(!el) return;
   const a=el.dataset.a, v=el.dataset.v;
   const g=S.game;
+  S.ok="";
 
+  if(a==="ping"){
+    S.err=""; S.ok="Checking…"; render();
+    try{
+      const r=await fetch(url("__ping")+"?t="+Date.now(),{cache:"no-store"});
+      if(!r.ok) throw new Error(r.status===401||r.status===403?"permission denied — open the Rules tab in Firebase and allow reads":"HTTP "+r.status);
+      await r.json();
+      S.ok="Database reachable. You're good to go."; S.err="";
+    }catch(e){
+      S.ok=""; S.err="Can't reach the database ("+e.message+"). Check DB_URL for a typo or a trailing slash.";
+    }
+    render(); return;
+  }
   if(a==="localSetup"){
-    S.mode="local";
-    S.game=makeGame("LOCAL",[]);
-    S.screen="lobby"; S.err=""; render(); return;
+    S.mode="local"; S.game=makeGame("LOCAL",[]); S.screen="lobby"; S.err=""; render(); return;
   }
   if(a==="addPlayer"){
     const i=document.getElementById("addName"), name=(i?i.value:"").trim();
-    if(!name) return;
+    if(!name){ S.err="Type a name first."; render(); return; }
     if(g.players.length>=8){ S.err="Eight is the limit."; render(); return; }
     if(g.players.some(p=>p.name.toLowerCase()===name.toLowerCase())){ S.err="Two people can't share a name."; render(); return; }
-    g.players.push({id:newId(),name,hand:[],out:false});
-    if(g.players.length===1) g.hostId=g.players[0].id;
+    g.players.push({id:newId(),name:name,hand:[],out:false});
+    if(!g.hostId) g.hostId=g.players[0].id;
     S.err=""; saveLocal(); render(); return;
   }
   if(a==="create"){
-    const name=(document.getElementById("nameIn").value||"").trim();
+    const f=document.getElementById("nameIn");
+    const name=(((f&&f.value)||S.nameIn)||"").trim();
     if(!name){ S.err="Put your name in first."; render(); return; }
+    if(!netOn()){ S.err="No database URL set."; render(); return; }
     const id=newId(), code=newCode();
-    const gm=makeGame(code,[{id,name,hand:[],out:false}]);
-    try{ await netPut(gm); }catch(e){ S.err="Couldn't reach the database. Check the URL and your signal."; render(); return; }
-    S.mode="online"; S.me={id,name}; S.code=code; S.game=gm; S.screen="lobby"; S.err="";
-    saveLocal(); startPolling(); render(); return;
+    const gm=makeGame(code,[{id:id,name:name,hand:[],out:false}]);
+    try{ await netPut(gm); }
+    catch(e){ S.err="Couldn't start a game — "+e.message+"."; render(); return; }
+    S.mode="online"; S.me={id:id,name:name}; S.code=code; S.game=gm; S.lastSync=JSON.stringify(gm);
+    S.screen="lobby"; S.err=""; saveLocal(); startPolling(); render(); return;
   }
   if(a==="join"){
-    const name=(document.getElementById("nameIn").value||"").trim();
-    const code=(document.getElementById("codeIn").value||"").trim().toUpperCase();
+    const nf=document.getElementById("nameIn"), cf=document.getElementById("codeIn");
+    const name=(((nf&&nf.value)||S.nameIn)||"").trim();
+    const code=((((cf&&cf.value)||S.codeIn)||"")).trim().toUpperCase();
     if(!name){ S.err="Put your name in first."; render(); return; }
     if(code.length!==4){ S.err="Codes are four letters."; render(); return; }
-    let gm; try{ gm=await netGet(code); }catch(e){ S.err="Couldn't reach the database."; render(); return; }
-    if(!gm){ S.err=`No game under ${code}. Check the code with the host.`; render(); return; }
+    let gm;
+    try{ gm=await netGet(code); }
+    catch(e){ S.err="Couldn't reach the database — "+e.message+"."; render(); return; }
+    if(!gm){ S.err="No game under "+code+". Check the code with the host."; render(); return; }
     const existing=gm.players.find(p=>p.name.toLowerCase()===name.toLowerCase());
     if(existing){ S.me={id:existing.id,name:existing.name}; }
     else{
       if(gm.phase!=="lobby"){ S.err="That game is underway. Rejoin with the exact name you used before."; render(); return; }
       if(gm.players.length>=8){ S.err="That game is full at eight."; render(); return; }
-      const id=newId(); gm.players.push({id,name,hand:[],out:false});
-      try{ await netPut(gm); }catch(e){ S.err="Couldn't join. Try again."; render(); return; }
-      S.me={id,name};
+      const id=newId(); gm.players.push({id:id,name:name,hand:[],out:false});
+      try{ await netPut(gm); }catch(e){ S.err="Couldn't join — "+e.message+"."; render(); return; }
+      S.me={id:id,name:name};
     }
-    S.mode="online"; S.code=code; S.game=gm; S.screen="lobby"; S.err="";
-    saveLocal(); startPolling(); render(); return;
+    S.mode="online"; S.code=code; S.game=gm; S.lastSync=JSON.stringify(gm);
+    S.screen="lobby"; S.err=""; saveLocal(); startPolling(); render(); return;
   }
-  if(a==="deal"){ await mutate(gm=>deal(gm)); S.tab="play"; S.viewer=null; render(); return; }
-  if(a==="unlock"){ S.viewer=actorId(g); S.tab="play"; render(); return; }
+  if(a==="deal"||a==="again"){
+    S.pick={}; S.confirm=false; S.turnMode="ask";
+    if(a==="again") S.notes={};
+    if(await mutate(gm=>deal(gm))){ S.tab="play"; S.viewer=null; render(); }
+    return;
+  }
+  if(a==="unlock"){ S.viewer=actorId(g); S.tab="play"; S.pick={}; S.turnMode="ask"; S.confirm=false; render(); return; }
   if(a==="tab"){ S.tab=v; render(); return; }
   if(a==="mode"){ S.turnMode=v; S.confirm=false; render(); return; }
   if(a==="confirm"){ S.confirm=true; render(); return; }
-  if(a==="mark"){ const n=notesFor(myId()); n[v]=((n[v]||0)+1)%3; saveLocal(); render(); return; }
+  if(a==="mark"){ const id=myId(); if(!id) return; const n=notesFor(id); n[v]=((n[v]||0)+1)%3; saveLocal(); render(); return; }
+  if(a==="leave"||a==="reset"){
+    stopPolling(); clearLocal();
+    Object.assign(S,{screen:"home",mode:null,code:null,me:null,viewer:null,game:null,
+      tab:"play",turnMode:"ask",confirm:false,err:"",ok:"",pick:{},notes:{},lastSync:"",busy:false});
+    render(); return;
+  }
 
   if(a==="ask"){
     const meId=myId(), sug={suspect:S.pick.s,weapon:S.pick.w,room:S.pick.r};
-    await mutate(gm=>{
-      const i=gm.order.indexOf(meId); const passers=[]; let disproverId=null,matches=[];
+    if(!sug.suspect||!sug.weapon||!sug.room){ S.err="Pick all three first."; render(); return; }
+    const ok=await mutate(gm=>{
+      if(gm.pending) return;
+      const i=gm.order.indexOf(meId);
+      if(i<0) return;
+      const passers=[]; let disproverId=null, matches=[];
       for(let k=1;k<gm.order.length;k++){
         const pl=byId(gm,gm.order[(i+k)%gm.order.length]);
         const m=pl.hand.filter(c=>c===sug.suspect||c===sug.weapon||c===sug.room);
         if(m.length){ disproverId=pl.id; matches=m; break; }
         passers.push(pl.id);
       }
-      gm.pending={by:meId,suggestion:sug,passers,disproverId,matches,card:null};
+      gm.pending={by:meId,suggestion:sug,passers:passers,disproverId:disproverId,matches:matches,card:null};
     });
-    if(S.mode==="local") S.viewer=null;
+    if(ok&&S.mode==="local") S.viewer=null;
     render(); return;
   }
-  if(a==="show"){ await mutate(gm=>{gm.pending.card=v;}); if(S.mode==="local") S.viewer=null; render(); return; }
+  if(a==="show"){
+    const ok=await mutate(gm=>{ if(gm.pending&&!gm.pending.card) gm.pending.card=v; });
+    if(ok&&S.mode==="local") S.viewer=null;
+    render(); return;
+  }
   if(a==="closeAsk"){
-    await mutate(gm=>{
-      const p=gm.pending;
-      gm.log.unshift({t:"ask",by:p.by,byName:byId(gm,p.by).name,suggestion:p.suggestion,
-        passers:p.passers,passerNames:p.passers.map(id=>byId(gm,id).name),
-        disproverId:p.disproverId,disproverName:p.disproverId?byId(gm,p.disproverId).name:null,card:p.card||null});
+    const ok=await mutate(gm=>{
+      const p=gm.pending; if(!p) return;
+      const askerName=(byId(gm,p.by)||{}).name||"Someone";
+      gm.log.unshift({t:"ask",by:p.by,byName:askerName,suggestion:p.suggestion,
+        passerNames:(p.passers||[]).map(id=>(byId(gm,id)||{}).name||"?"),
+        disproverId:p.disproverId||null,
+        disproverName:p.disproverId?((byId(gm,p.disproverId)||{}).name||"?"):null,
+        card:p.card||null});
       gm.pending=null; advance(gm);
     });
-    if(S.mode==="local") S.viewer=null;
+    if(ok&&S.mode==="local") S.viewer=null;
     S.confirm=false; render(); return;
   }
   if(a==="accuse"){
     const meId=myId(), sug={suspect:S.pick.s,weapon:S.pick.w,room:S.pick.r};
-    await mutate(gm=>{
-      const me=byId(gm,meId);
-      const right=sug.suspect===gm.solution.suspect&&sug.weapon===gm.solution.weapon&&sug.room===gm.solution.room;
-      gm.log.unshift({t:"accuse",byName:me.name,suggestion:sug,right});
-      if(right){ gm.phase="over"; gm.winner=me.name; }
-      else{ me.out=true; advance(gm); }
+    const ok=await mutate(gm=>{
+      const p=byId(gm,meId); if(!p||!gm.solution) return;
+      const right = sug.suspect===gm.solution.suspect && sug.weapon===gm.solution.weapon && sug.room===gm.solution.room;
+      gm.log.unshift({t:"accuse",by:meId,byName:p.name,suggestion:sug,right:right});
+      if(right){ gm.phase="over"; gm.winner=p.name; }
+      else{ p.out=true; advance(gm); }
     });
-    S.confirm=false; if(S.mode==="local") S.viewer=null; render(); return;
+    S.confirm=false;
+    if(ok&&S.mode==="local") S.viewer=null;
+    render(); return;
   }
-  if(a==="reset"){ stopPolling(); clearLocal(); Object.assign(S,{screen:"home",mode:null,code:null,me:null,viewer:null,game:null,tab:"play",turnMode:"ask",confirm:false,err:"",pick:{},notes:{}}); render(); return; }
 });
 
-/* keep typed values without re-rendering the world */
+/* save typed values without re-rendering the world */
 document.addEventListener("change",ev=>{
   const t=ev.target;
-  if(t.dataset.pick){ S.pick[t.dataset.pick]=t.value; return; }
+  if(!t.dataset) return;
+  if(t.dataset.pick){ S.pick[t.dataset.pick]=t.value; S.confirm=false; return; }
   if(t.dataset.list){
+    const which=t.dataset.list;
     const list=t.value.split("\n").map(s=>s.trim()).filter(Boolean);
-    mutate(gm=>{ gm.setup[t.dataset.list]=list; });
+    if(!list.length){ S.err="A list can't be empty."; render(); return; }
+    mutate(gm=>{ gm.setup[which]=list; },{quiet:true});
   }
 });
 document.addEventListener("input",ev=>{
@@ -537,20 +640,30 @@ document.addEventListener("input",ev=>{
 
 /* ---------------- boot ---------------- */
 (function boot(){
-  try{
-    const raw=localStorage.getItem(LS);
-    if(raw){
-      const s=JSON.parse(raw);
-      S.notes=s.notes||{};
-      if(s.online&&netOn()){
-        S.mode="online"; S.code=s.code; S.me=s.me; S.screen="lobby";
-        netGet(s.code).then(g=>{ if(g){S.game=g; startPolling(); render();} else { clearLocal(); S.screen="home"; render(); } })
-          .catch(()=>{ S.screen="home"; render(); });
-        render(); return;
-      }
-      if(s.game){ S.mode="local"; S.game=s.game; S.screen="lobby"; }
+  let saved=null;
+  try{ saved=JSON.parse(localStorage.getItem(LS)||"null"); }catch(e){}
+  if(saved){
+    S.notes=saved.notes||{};
+    if(saved.online&&netOn()&&saved.code&&saved.me){
+      S.mode="online"; S.code=saved.code; S.me=saved.me; S.screen="lobby";
+      render();
+      netGet(saved.code).then(g=>{
+        if(g){ S.game=g; S.lastSync=JSON.stringify(g); startPolling(); }
+        else{
+          clearLocal();
+          Object.assign(S,{screen:"home",mode:null,code:null,me:null,game:null});
+          S.err="That game is gone from the database.";
+        }
+        render();
+      }).catch(e=>{
+        Object.assign(S,{screen:"home",mode:null,code:null,me:null,game:null});
+        S.err="Couldn't reach the database — "+e.message+".";
+        render();
+      });
+      return;
     }
-  }catch(e){}
+    if(saved.game){ S.mode="local"; S.game=saved.game; S.screen="lobby"; }
+  }
   render();
 })();
 </script>
