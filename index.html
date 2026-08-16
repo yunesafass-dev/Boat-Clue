@@ -333,25 +333,34 @@ function reachable(b,pos,steps){
 /* ---------------- game logic ---------------- */
 function makeGame(code,players){
   return{code:code,phase:"lobby",hostId:players.length?players[0].id:null,players:players,
-    setup:clone(DEFAULTS),board:true,order:[],turn:0,ts:{roll:null,moved:false},
+    setup:clone(DEFAULTS),board:true,useNames:true,order:[],turn:0,ts:{roll:null,moved:false},
     pending:null,log:[],solution:null,winner:null};
 }
+/* the suspects actually in play — the players themselves, or the written list */
+function suspectList(g){
+  return g.useNames ? g.players.map(p=>p.name) : g.setup.suspects;
+}
 function setupProblems(g){
-  const all=[].concat(g.setup.suspects,g.setup.weapons,g.setup.rooms);
+  const sus=suspectList(g);
+  const all=[].concat(sus,g.setup.weapons,g.setup.rooms);
   const dup=all.find((c,i)=>all.indexOf(c)!==i);
   const out=[];
   if(g.players.length<2) out.push("Waiting on at least one more player before you can deal.");
-  ["suspects","weapons","rooms"].forEach(k=>{ if(g.setup[k].length<3) out.push("Add at least three "+k+"."); });
+  if(sus.length<3) out.push(g.useNames
+    ? "Playing as yourselves needs at least three people. Add another, or switch the suspects to characters."
+    : "Add at least three suspects.");
+  ["weapons","rooms"].forEach(k=>{ if(g.setup[k].length<3) out.push("Add at least three "+k+"."); });
   if(dup) out.push('Every name has to be different — "'+dup+'" appears twice.');
   if(all.length-3<g.players.length) out.push("Not enough cards to give everyone one. Add more.");
   if(g.board){
     if(g.setup.rooms.length>9) out.push("The board fits nine rooms. Trim the list or switch to in-person mode.");
     if(g.setup.rooms.length<4) out.push("The board needs at least four rooms.");
-    if(g.setup.suspects.length<g.players.length) out.push("Board mode gives everyone a character, so you need at least as many suspects as players.");
+    if(sus.length<g.players.length) out.push("Board mode gives everyone a character, so you need at least as many suspects as players.");
   }
   return out;
 }
 function deal(g){
+  if(g.useNames) g.setup.suspects=g.players.map(p=>p.name);
   const pick=a=>a[Math.floor(Math.random()*a.length)];
   const sol={suspect:pick(g.setup.suspects),weapon:pick(g.setup.weapons),room:pick(g.setup.rooms)};
   const deck=shuffle([].concat(g.setup.suspects,g.setup.weapons,g.setup.rooms)
@@ -365,7 +374,7 @@ function deal(g){
     const chars=shuffle(g.setup.suspects);
     g.order.forEach((id,i)=>{
       const p=byId(g,id);
-      p.char=chars[i%chars.length];
+      p.char = g.useNames ? p.name : chars[i%chars.length];
       p.color=COLORS[i%COLORS.length];
       const k=b.ring[i%b.ring.length];
       const xy=k.split(",").map(Number);
@@ -486,12 +495,33 @@ function lobby(){
   <p class="note" style="margin-top:0">${g.board
     ?"Dice, pawns, corridors, secret passages. You can only accuse the room you're standing in."
     :"No board. Walk to the actual room you're naming and say it out loud."}</p>
+  <div class="eyebrow" style="margin-top:18px">Who the suspects are</div>
+  <div class="seg">
+    <button data-a="names" data-v="1" aria-selected="${!!g.useNames}">Us</button>
+    <button data-a="names" data-v="0" aria-selected="${!g.useNames}">Characters</button>
+  </div>
+  <p class="note" style="margin-top:0">${g.useNames
+    ?"One of you did it. Everyone plays themselves, so naming someone drags them into your room."
+    :"Everyone gets handed a character from the list below."}</p>
   <div class="rule"></div>
   <div class="eyebrow">The deck — one per line</div>
   <p class="note" style="margin-top:0">${g.board
     ?"Four to nine rooms. Everything else is up to you. Tap away from a box to save it."
     :"Swap these for real people and real places around you. Tap away from a box to save it."}</p>
-  ${["suspects","weapons","rooms"].map(k=>`
+  ${g.useNames?`
+    <div style="margin-bottom:14px">
+      <div class="eyebrow">suspects</div>
+      <div class="card" style="margin-bottom:0">
+        <div class="chips" style="margin-top:0">${g.players.length
+          ?g.players.map(p=>'<span class="chip">'+esc(p.name)+'</span>').join("")
+          :'<span class="note">Whoever joins.</span>'}</div>
+      </div>
+    </div>`:`
+    <div style="margin-bottom:14px">
+      <div class="eyebrow">suspects</div>
+      <textarea data-list="suspects" rows="${Math.max(4,g.setup.suspects.length)}">${esc(g.setup.suspects.join("\n"))}</textarea>
+    </div>`}
+  ${["weapons","rooms"].map(k=>`
     <div style="margin-bottom:14px">
       <div class="eyebrow">${k}</div>
       <textarea data-list="${k}" rows="${Math.max(4,g.setup[k].length)}">${esc(g.setup[k].join("\n"))}</textarea>
@@ -587,7 +617,7 @@ function boardView(g,go,meId){
     '<span><i class="k-pass">\u21C4</i>Secret passage</span></div>';
   html+='<div class="legend">'+g.players.map(p=>'<span'+(p.id===meId?' class="is-me"':"")+'>'+pawnFor(p,meId)+esc(p.name)+
     (p.id===meId?" (you)":"")+
-    (p.char?' <span class="tag">'+esc(p.char)+'</span>':"")+
+    (p.char&&p.char!==p.name?' <span class="tag">'+esc(p.char)+'</span>':"")+
     (p.out?' <span class="tag" style="color:var(--signal)">OUT</span>':"")+'</span>').join("")+'</div>';
   return html;
 }
@@ -681,7 +711,8 @@ function table(){
   <div class="card">
     <div class="eyebrow">Now playing</div>
     <div class="big" style="${myTurn?"color:var(--brass)":""}">${myTurn?"Your turn":esc(cur?cur.name:"—")+"'s turn"}</div>
-    ${g.board&&me.char?'<p class="note" style="margin-bottom:0">You\'re playing '+esc(me.char)+
+    ${g.board&&me.char?'<p class="note" style="margin-bottom:0">'+
+      (me.char===me.name?'You':'You\'re playing '+esc(me.char))+
       ' &middot; '+(roomOf(me)?'in the <b style="color:var(--chart)">'+esc(roomOf(me))+'</b>':'out on the boardwalk, between rooms')+'</p>':""}
     ${me.out?'<p class="note" style="color:var(--signal);margin-bottom:0">You accused wrong. You still show cards, but your turns are over.</p>':""}
   </div>
@@ -771,6 +802,10 @@ document.addEventListener("click",async ev=>{
   }
   if(a==="localSetup"){ S.mode="local"; S.game=makeGame("LOCAL",[]); S.screen="lobby"; S.err=""; render(); return; }
   if(a==="board"){ await mutate(gm=>{ gm.board = v==="1"; }); return; }
+  if(a==="names"){ await mutate(gm=>{
+      if(v==="1"){ gm.useNames=true; }
+      else{ gm.useNames=false; if(!gm.setup.suspects||gm.setup.suspects.length<3) gm.setup.suspects=DEFAULTS.suspects.slice(); }
+    }); return; }
   if(a==="addPlayer"){
     const i=document.getElementById("addName"), name=(i?i.value:"").trim();
     if(!name){ S.err="Type a name first."; render(); return; }
