@@ -78,21 +78,30 @@
     font-size:11px;letter-spacing:.16em;text-transform:uppercase;padding:4px 0}
 
   /* ---- board ---- */
-  .board{display:grid;width:100%;gap:1px;background:rgba(8,25,31,.7);
-    border:1px solid rgba(201,162,39,.3);padding:1px;border-radius:2px;margin-bottom:14px}
-  .cell{background:rgba(20,63,76,.35);position:relative;display:flex;align-items:center;justify-content:center}
-  .cell.door{background:rgba(201,162,39,.2)}
-  .cell.go,.room.go{background:rgba(201,162,39,.5);cursor:pointer;box-shadow:inset 0 0 0 1px var(--brass)}
-  .room{background:rgba(15,49,59,.9);border:1px solid rgba(201,162,39,.35);
-    display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2px;overflow:hidden;position:relative}
-  .room .rname{font-family:var(--mono);font-size:8px;letter-spacing:.06em;text-transform:uppercase;
-    color:var(--chart-dim);text-align:center;line-height:1.15;word-break:break-word}
+  .board{display:grid;width:100%;gap:0;background:#0A1E25;
+    border:2px solid rgba(201,162,39,.45);padding:0;border-radius:3px;margin-bottom:14px;overflow:hidden}
+  .cell{background:#12333D;position:relative;display:flex;align-items:center;justify-content:center;
+    box-shadow:inset 0 0 0 .5px rgba(8,25,31,.55)}
+  .cell.alt{background:#153A45}
+  .cell.start{box-shadow:inset 0 0 0 1.5px rgba(230,220,195,.28)}
+  .cell.door{background:#7A6220;box-shadow:inset 0 0 0 1px rgba(201,162,39,.9)}
+  .cell.go,.room.go{background:var(--brass);cursor:pointer;box-shadow:inset 0 0 0 1.5px #F2DC9A}
+  .room{background:
+      repeating-linear-gradient(90deg,#1B4653 0 7px,#194250 7px 14px);
+    border:1.5px solid rgba(201,162,39,.55);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:2px;overflow:hidden;position:relative;z-index:2}
+  .room .rname{font-family:var(--mono);font-size:9px;letter-spacing:.05em;text-transform:uppercase;
+    color:var(--chart);text-align:center;line-height:1.2;word-break:break-word;
+    text-shadow:0 1px 2px rgba(8,25,31,.9)}
+  .room.go{background:var(--brass)}
   .room.go .rname{color:var(--ink)}
-  .room .pass{position:absolute;top:1px;right:2px;font-size:8px;color:var(--brass)}
-  .pawns{display:flex;flex-wrap:wrap;gap:1px;justify-content:center;margin-top:1px}
-  .pawn{width:11px;height:11px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
-    font-family:var(--mono);font-size:7px;font-weight:700;color:#08191F;font-style:normal;flex:none}
-  .cell .pawn{position:absolute;width:70%;height:70%;font-size:8px}
+  .room .pass{position:absolute;top:1px;right:3px;font-size:10px;color:var(--brass);line-height:1}
+  .pawns{display:flex;flex-wrap:wrap;gap:2px;justify-content:center;margin-top:3px}
+  .pawn{width:12px;height:12px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:7px;font-weight:700;color:#08191F;font-style:normal;flex:none;
+    box-shadow:0 0 0 1px rgba(8,25,31,.6)}
+  .cell .pawn{position:absolute;width:78%;height:78%;font-size:8px}
   .dice{display:flex;gap:10px;align-items:center;justify-content:center;margin:6px 0 14px}
   .die{width:44px;height:44px;border:1px solid var(--brass);border-radius:4px;background:rgba(201,162,39,.1);
     display:flex;align-items:center;justify-content:center;font-size:26px;line-height:1;color:var(--brass)}
@@ -215,37 +224,51 @@ function stopPolling(){ if(poller) clearInterval(poller); poller=null; }
    BOARD — generated from the room list, same on every device
    ============================================================ */
 const K=(x,y)=>x+","+y;
+
+/* A hand-drawn floor plan, 15 x 17. Rooms fill in this order, so a
+   short list still gets the four corners. Doors are the corridor
+   squares that touch a room; each touches exactly one. */
+const TEMPLATE={
+  W:15,H:17,
+  slots:[
+    {key:"A",x0:0, y0:0, x1:3, y1:3, doors:["4,1","1,4"],   pass:"I"},
+    {key:"C",x0:11,y0:0, x1:14,y1:3, doors:["10,1","12,4"], pass:"G"},
+    {key:"G",x0:0, y0:12,x1:3, y1:15,doors:["4,13","1,11"], pass:"C"},
+    {key:"I",x0:11,y0:12,x1:14,y1:15,doors:["10,13","12,11"],pass:"A"},
+    {key:"B",x0:6, y0:1, x1:8, y1:4, doors:["5,2","7,5"]},
+    {key:"D",x0:0, y0:6, x1:3, y1:9, doors:["4,7","1,5"]},
+    {key:"F",x0:11,y0:6, x1:14,y1:9, doors:["10,7","12,5"]},
+    {key:"H",x0:6, y0:13,x1:8, y1:16,doors:["5,14","7,12"]},
+    {key:"E",x0:6, y0:7, x1:8, y1:10,doors:["7,6","9,9"]}
+  ],
+  starts:["4,0","9,0","0,5","14,5","0,11","14,11","4,16","12,16"]
+};
+
 function buildBoard(rooms){
-  const list=rooms.slice(0,9);
-  const N=list.length;
-  const cols = N<=2?1 : N<=4?2 : 3;
-  const rows = Math.ceil(N/cols);
-  const W=cols*4+1, H=rows*3+1;
-  const roomAt={}, doorOwner={}, blocked={};
+  const list=rooms.slice(0,TEMPLATE.slots.length);
+  const roomAt={},doorOwner={},blocked={};
   list.forEach((name,i)=>{
-    const c=i%cols, r=Math.floor(i/cols);
-    const x0=c*4+1, y0=r*3+1;
-    const doors=[K(x0+1,y0-1),K(x0+1,y0+2)];
-    roomAt[name]={i,x0,y0,doors,pass:null};
-    doors.forEach(d=>{ doorOwner[d]=name; });
-    for(let x=x0;x<=x0+2;x++) for(let y=y0;y<=y0+1;y++) blocked[K(x,y)]=name;
+    const s=TEMPLATE.slots[i];
+    roomAt[name]={key:s.key,x0:s.x0,y0:s.y0,w:s.x1-s.x0+1,h:s.y1-s.y0+1,doors:s.doors.slice(),pass:null};
+    for(let x=s.x0;x<=s.x1;x++) for(let y=s.y0;y<=s.y1;y++) blocked[K(x,y)]=name;
   });
   const cells={};
-  for(let x=0;x<W;x++) for(let y=0;y<H;y++) if(!blocked[K(x,y)]) cells[K(x,y)]=true;
-  /* secret passages between opposite corner rooms */
-  if(N>=4&&cols>=2&&rows>=2){
-    const tl=list[0], tr=list[cols-1], bl=list[(rows-1)*cols], br=list[N-1];
-    const link=(a,b)=>{ if(a&&b&&a!==b&&roomAt[a]&&roomAt[b]&&!roomAt[a].pass&&!roomAt[b].pass){
-      roomAt[a].pass=b; roomAt[b].pass=a; } };
-    link(tl,br); link(tr,bl);
-  }
-  /* evenly spaced starting squares around the outside */
-  const ring=[];
-  for(let x=0;x<W;x++) if(cells[K(x,0)]) ring.push(K(x,0));
-  for(let y=1;y<H;y++) if(cells[K(W-1,y)]) ring.push(K(W-1,y));
-  for(let x=W-2;x>=0;x--) if(cells[K(x,H-1)]) ring.push(K(x,H-1));
-  for(let y=H-2;y>0;y--) if(cells[K(0,y)]) ring.push(K(0,y));
-  return {W,H,cells,rooms:roomAt,doorOwner,list,ring};
+  for(let x=0;x<TEMPLATE.W;x++) for(let y=0;y<TEMPLATE.H;y++) if(!blocked[K(x,y)]) cells[K(x,y)]=true;
+  list.forEach(name=>{
+    const R=roomAt[name];
+    R.doors=R.doors.filter(d=>cells[d]);
+    R.doors.forEach(d=>{ doorOwner[d]=name; });
+  });
+  /* secret passages, only where both corner rooms are in play */
+  const byKey={}; list.forEach((n,i)=>{ byKey[TEMPLATE.slots[i].key]=n; });
+  list.forEach((name,i)=>{
+    const s=TEMPLATE.slots[i];
+    if(s.pass&&byKey[s.pass]) roomAt[name].pass=byKey[s.pass];
+  });
+  const ring=TEMPLATE.starts.filter(k=>cells[k]);
+  const startSet={}; ring.forEach(k=>{ startSet[k]=true; });
+  return {W:TEMPLATE.W,H:TEMPLATE.H,cells:cells,rooms:roomAt,doorOwner:doorOwner,
+          list:list,ring:ring,startSet:startSet};
 }
 
 /* where can this player go with `steps` moves? */
@@ -312,7 +335,7 @@ function deal(g){
       const p=byId(g,id);
       p.char=chars[i%chars.length];
       p.color=COLORS[i%COLORS.length];
-      const k=b.ring[Math.floor(i*b.ring.length/g.order.length)%b.ring.length];
+      const k=b.ring[i%b.ring.length];
       const xy=k.split(",").map(Number);
       p.pos={x:xy[0],y:xy[1]};
     });
@@ -338,6 +361,13 @@ function actorId(g){
 const myId=()=>S.mode==="local"?S.viewer:(S.me?S.me.id:null);
 const notesFor=id=>(S.notes[id]=S.notes[id]||{});
 const roomOf=p=>(p&&p.pos&&p.pos.room)?p.pos.room:null;
+/* never trust ts to exist — a missing one means nobody has rolled yet */
+function TS(g){
+  if(!g.ts||typeof g.ts!=="object") g.ts={roll:null,moved:false};
+  if(typeof g.ts.roll!=="number") g.ts.roll=null;
+  g.ts.moved = g.ts.moved===true;
+  return g.ts;
+}
 
 function syncPick(g){
   const map={s:"suspects",w:"weapons",r:"rooms"};
@@ -348,7 +378,7 @@ function syncPick(g){
 /* may this player ask right now? */
 function canAsk(g,p){
   if(!g.board) return true;
-  return !!roomOf(p) && (g.ts.moved || p.pulled);
+  return !!roomOf(p) && (TS(g).moved===true || p.pulled===true);
 }
 
 /* ============================================================
@@ -485,23 +515,27 @@ function boardView(g,go){
     (here[k]=here[k]||[]).push(p);
   });
   let html='<div class="board" style="grid-template-columns:repeat('+b.W+',1fr);aspect-ratio:'+b.W+'/'+b.H+'">';
-  b.list.forEach(name=>{
-    const R=b.rooms[name], on=go&&go.rooms&&(name in go.rooms);
-    const occ=here["room:"+name]||[];
-    html+='<div class="room'+(on?" go":"")+'" style="grid-column:'+(R.x0+1)+'/span 3;grid-row:'+(R.y0+1)+'/span 2"'+
-      (on?' data-a="move" data-v="room:'+esc(name)+'"':"")+'>'+
-      (R.pass?'<span class="pass">\u21C4</span>':"")+
-      '<span class="rname">'+esc(name)+'</span>'+
-      (occ.length?'<span class="pawns">'+occ.map(pawnFor).join("")+'</span>':"")+
-      '</div>';
-  });
+  /* floor first, so rooms sit on top of it */
   for(let y=0;y<b.H;y++) for(let x=0;x<b.W;x++){
     const k=K(x,y); if(!b.cells[k]) continue;
     const on=go&&go.cells&&(k in go.cells);
     const occ=here[k]||[];
-    html+='<div class="cell'+(b.doorOwner[k]?" door":"")+(on?" go":"")+'" style="grid-column:'+(x+1)+';grid-row:'+(y+1)+'"'+
+    const cls="cell"+(((x+y)%2)?" alt":"")+(b.doorOwner[k]?" door":"")+
+      (b.startSet[k]?" start":"")+(on?" go":"");
+    html+='<div class="'+cls+'" style="grid-column:'+(x+1)+';grid-row:'+(y+1)+'"'+
       (on?' data-a="move" data-v="'+k+'"':"")+'>'+(occ.length?pawnFor(occ[0]):"")+'</div>';
   }
+  b.list.forEach(name=>{
+    const R=b.rooms[name], on=go&&go.rooms&&(name in go.rooms);
+    const occ=here["room:"+name]||[];
+    html+='<div class="room'+(on?" go":"")+'" style="grid-column:'+(R.x0+1)+'/span '+R.w+
+      ';grid-row:'+(R.y0+1)+'/span '+R.h+'"'+
+      (on?' data-a="move" data-v="room:'+esc(name)+'"':"")+'>'+
+      (R.pass?'<span class="pass" title="secret passage">\u21C4</span>':"")+
+      '<span class="rname">'+esc(name)+'</span>'+
+      (occ.length?'<span class="pawns">'+occ.map(pawnFor).join("")+'</span>':"")+
+      '</div>';
+  });
   html+='</div>';
   html+='<div class="legend">'+g.players.map(p=>'<span>'+pawnFor(p)+esc(p.name)+
     (p.char?' <span class="tag">'+esc(p.char)+'</span>':"")+(p.out?' <span class="tag" style="color:var(--signal)">OUT</span>':"")+'</span>').join("")+'</div>';
@@ -558,26 +592,29 @@ function table(){
   /* board mode: roll, then move */
   let boardBlock="", moveBlock="";
   if(g.board){
+    const ts=TS(g);
     const b=buildBoard(g.setup.rooms);
     let go=null;
-    if(myTurn&&g.ts.roll&&!g.ts.moved&&me.pos) go=reachable(b,me.pos,g.ts.roll);
+    if(myTurn&&ts.roll&&!ts.moved&&me.pos) go=reachable(b,me.pos,ts.roll);
     boardBlock=boardView(g,go);
     if(myTurn){
       const inRoom=roomOf(me);
       const passTo=inRoom&&b.rooms[inRoom]?b.rooms[inRoom].pass:null;
-      if(!g.ts.roll&&!g.ts.moved){
+      if(!ts.roll&&!ts.moved){
         moveBlock=`<div class="card">
-          ${me.pulled?'<p class="note" style="margin-top:0;color:var(--brass)">You were pulled into the '+esc(inRoom)+'. You may ask from here without rolling, or roll and move away.</p>':''}
+          <div class="eyebrow">Your move</div>
+          ${me.pulled?'<p class="note" style="margin-top:0;color:var(--brass)">You were dragged into the '+esc(inRoom)+'. Ask from here without rolling, or roll and move away.</p>'
+                     :'<p class="note" style="margin-top:0">Roll before you can do anything else.</p>'}
           <button class="btn" data-a="roll">Roll the dice</button>
           ${passTo?'<button class="btn ghost" data-a="pass" data-v="'+esc(passTo)+'">Take the secret passage to the '+esc(passTo)+'</button>':''}
         </div>`;
-      }else if(g.ts.roll&&!g.ts.moved){
+      }else if(ts.roll&&!ts.moved){
         const n=go?(Object.keys(go.cells).length+Object.keys(go.rooms).length):0;
         moveBlock=`<div class="card">
           <div class="eyebrow">You rolled</div>
-          <div class="dice"><span class="die">${PIPS[g.ts.d1]}</span><span class="die">${PIPS[g.ts.d2]}</span>
-            <span class="big" style="margin:0">${g.ts.roll}</span></div>
-          <p class="note" style="margin:0">Tap any glowing square or room — up to ${g.ts.roll} steps. ${n?"":"Nowhere to go; end your turn."}</p>
+          <div class="dice"><span class="die">${PIPS[ts.d1]||""}</span><span class="die">${PIPS[ts.d2]||""}</span>
+            <span class="big" style="margin:0">${ts.roll}</span></div>
+          <p class="note" style="margin:0">Tap any glowing square or room — up to ${ts.roll} steps. ${n?"":"Nowhere to go; end your turn."}</p>
           ${n?"":'<button class="btn ghost" data-a="endturn" style="margin-top:12px">End turn</button>'}
         </div>`;
       }
@@ -586,6 +623,7 @@ function table(){
 
   const askable = myTurn && canAsk(g,me);
   const roomNow = g.board ? roomOf(me) : null;
+  const showActions = myTurn && (!g.board || TS(g).moved===true || me.pulled===true);
 
   return `
   <div class="card">
@@ -597,7 +635,7 @@ function table(){
   ${boardBlock}
   ${moveBlock}
   ${hand()}
-  ${myTurn&&(!g.board||g.ts.moved||me.pulled)?`
+  ${showActions?`
   <div class="card">
     <div class="seg">
       <button data-a="mode" data-v="ask" aria-selected="${S.turnMode==="ask"}">Ask the table</button>
@@ -614,7 +652,7 @@ function table(){
                  :"You have to be standing in a room to ask. Move into one first.")
         :"Walk to the room you're naming and say it out loud, then tap."}</p>
       <button class="btn" data-a="ask" ${askable?"":"disabled"}>Ask the table</button>
-      ${g.board&&g.ts.moved?'<button class="btn ghost" data-a="endturn">End turn without asking</button>':""}`:`
+      ${g.board&&TS(g).moved===true?'<button class="btn ghost" data-a="endturn">End turn without asking</button>':""}`:`
       <p class="note" style="color:var(--signal)">Right and you win outright. Wrong and you're out — still showing cards, never winning.</p>
       ${S.confirm
         ?'<button class="btn signal" data-a="accuse">Lock it in — '+esc(S.pick.s)+", "+esc(S.pick.r)+", "+esc(S.pick.w)+'</button>'
@@ -743,7 +781,8 @@ document.addEventListener("click",async ev=>{
   if(a==="roll"){
     const meId=myId();
     await mutate(gm=>{
-      if(gm.order[gm.turn]!==meId||gm.ts.roll||gm.ts.moved) return;
+      if(gm.order[gm.turn]!==meId) return;
+      const t=TS(gm); if(t.roll||t.moved) return;
       const d1=d6(), d2=d6();
       gm.ts={roll:d1+d2,d1:d1,d2:d2,moved:false};
     });
@@ -753,7 +792,7 @@ document.addEventListener("click",async ev=>{
     const meId=myId();
     await mutate(gm=>{
       const p=byId(gm,meId);
-      if(gm.order[gm.turn]!==meId||gm.ts.moved||!p||!roomOf(p)) return;
+      if(gm.order[gm.turn]!==meId||TS(gm).moved||!p||!roomOf(p)) return;
       const b=buildBoard(gm.setup.rooms), R=b.rooms[roomOf(p)];
       if(!R||R.pass!==v) return;
       p.pos={room:v}; gm.ts={roll:null,moved:true};
@@ -764,9 +803,10 @@ document.addEventListener("click",async ev=>{
     const meId=myId();
     await mutate(gm=>{
       const p=byId(gm,meId);
-      if(gm.order[gm.turn]!==meId||!gm.ts.roll||gm.ts.moved||!p||!p.pos) return;
+      const t=TS(gm);
+      if(gm.order[gm.turn]!==meId||!t.roll||t.moved||!p||!p.pos) return;
       const b=buildBoard(gm.setup.rooms);
-      const go=reachable(b,p.pos,gm.ts.roll);
+      const go=reachable(b,p.pos,t.roll);
       if(v.indexOf("room:")===0){
         const name=v.slice(5);
         if(!(name in go.rooms)) return;
@@ -776,7 +816,7 @@ document.addEventListener("click",async ev=>{
         const xy=v.split(",").map(Number);
         p.pos={x:xy[0],y:xy[1]};
       }
-      gm.ts.moved=true;
+      TS(gm).moved=true;
     });
     return;
   }
