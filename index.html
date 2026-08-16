@@ -78,35 +78,57 @@
     font-size:11px;letter-spacing:.16em;text-transform:uppercase;padding:4px 0}
 
   /* ---- board ---- */
-  .board{display:grid;width:100%;gap:0;background:#0A1E25;
-    border:2px solid rgba(201,162,39,.45);padding:0;border-radius:3px;margin-bottom:14px;overflow:hidden}
-  .cell{background:#12333D;position:relative;display:flex;align-items:center;justify-content:center;
-    box-shadow:inset 0 0 0 .5px rgba(8,25,31,.55)}
-  .cell.alt{background:#153A45}
-  .cell.start{box-shadow:inset 0 0 0 1.5px rgba(230,220,195,.28)}
-  .cell.door{background:#7A6220;box-shadow:inset 0 0 0 1px rgba(201,162,39,.9)}
-  .cell.go,.room.go{background:var(--brass);cursor:pointer;box-shadow:inset 0 0 0 1.5px #F2DC9A}
-  .room{background:
-      repeating-linear-gradient(90deg,#1B4653 0 7px,#194250 7px 14px);
-    border:1.5px solid rgba(201,162,39,.55);
+  .board{display:grid;width:100%;gap:0;background:#081C22;
+    border:2px solid rgba(201,162,39,.5);border-radius:3px;margin-bottom:10px;overflow:hidden}
+  .cell{background:#123039;position:relative;display:flex;align-items:center;justify-content:center;
+    box-shadow:inset 0 0 0 .5px rgba(8,25,31,.5)}
+  .cell.alt{background:#15373F}
+  .cell.start::after{content:"";position:absolute;inset:2px;border:1.5px dashed rgba(230,220,195,.35);border-radius:2px}
+  /* doorway: a brass threshold on the side facing its room */
+  .cell.door::before{content:"";position:absolute;background:var(--brass);border-radius:1px;
+    box-shadow:0 0 4px rgba(201,162,39,.7)}
+  .cell.door.n::before{top:0;left:18%;right:18%;height:26%}
+  .cell.door.s::before{bottom:0;left:18%;right:18%;height:26%}
+  .cell.door.w::before{left:0;top:18%;bottom:18%;width:26%}
+  .cell.door.e::before{right:0;top:18%;bottom:18%;width:26%}
+  /* reachable: tinted, outlined, with a target dot — pawns stay visible */
+  .cell.go{background:rgba(201,162,39,.3);box-shadow:inset 0 0 0 1.5px var(--brass);cursor:pointer}
+  .cell.go:not(.busy)::after{content:"";position:absolute;width:38%;height:38%;border-radius:50%;
+    background:var(--brass);border:none;inset:auto}
+  .cell .more{position:absolute;right:0;bottom:0;font-family:var(--mono);font-size:7px;font-weight:700;
+    color:var(--ink);background:var(--chart);border-radius:2px;padding:0 1px;line-height:1.2}
+  .room{background:repeating-linear-gradient(90deg,#1C4855 0 7px,#1A4451 7px 14px);
+    border:2px solid rgba(201,162,39,.6);
     display:flex;flex-direction:column;align-items:center;justify-content:center;
     padding:2px;overflow:hidden;position:relative;z-index:2}
-  .room .rname{font-family:var(--mono);font-size:9px;letter-spacing:.05em;text-transform:uppercase;
-    color:var(--chart);text-align:center;line-height:1.2;word-break:break-word;
-    text-shadow:0 1px 2px rgba(8,25,31,.9)}
-  .room.go{background:var(--brass)}
-  .room.go .rname{color:var(--ink)}
-  .room .pass{position:absolute;top:1px;right:3px;font-size:10px;color:var(--brass);line-height:1}
-  .pawns{display:flex;flex-wrap:wrap;gap:2px;justify-content:center;margin-top:3px}
-  .pawn{width:12px;height:12px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
-    font-family:var(--mono);font-size:7px;font-weight:700;color:#08191F;font-style:normal;flex:none;
-    box-shadow:0 0 0 1px rgba(8,25,31,.6)}
-  .cell .pawn{position:absolute;width:78%;height:78%;font-size:8px}
+  .room .rname{font-family:var(--mono);font-size:10px;letter-spacing:.02em;text-transform:uppercase;
+    color:var(--chart);text-align:center;line-height:1.25;word-break:break-word;
+    text-shadow:0 1px 3px rgba(8,25,31,.95)}
+  .room.go{background:rgba(201,162,39,.34);border-color:#F2DC9A;box-shadow:inset 0 0 0 2px var(--brass);cursor:pointer}
+  .room.go .rname{color:#FFF6DA}
+  .room .enter{font-family:var(--mono);font-size:7px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--ink);background:var(--brass);padding:1px 4px;border-radius:2px;margin-top:3px}
+  .room .pass{position:absolute;top:2px;right:3px;font-size:11px;color:var(--brass);line-height:1}
+  .pawns{display:flex;flex-wrap:wrap;gap:3px;justify-content:center;margin-top:4px}
+  .pawn{width:15px;height:15px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:9px;font-weight:700;color:#08191F;font-style:normal;flex:none;
+    box-shadow:0 0 0 1.5px rgba(8,25,31,.8),0 1px 2px rgba(0,0,0,.5)}
+  .pawn.me{box-shadow:0 0 0 2px #FFF8E0,0 0 7px rgba(255,248,224,.75)}
+  .pawn.gone{opacity:.45}
+  .cell .pawn{position:absolute;width:88%;height:88%;font-size:10px}
+  .key{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px;font-size:11px;color:var(--chart-dim)}
+  .key span{display:flex;align-items:center;gap:5px}
+  .key i{width:13px;height:13px;flex:none;display:inline-block;border-radius:2px;font-style:normal}
+  .key .k-door{background:var(--brass);box-shadow:0 0 4px rgba(201,162,39,.7)}
+  .key .k-go{background:rgba(201,162,39,.3);box-shadow:inset 0 0 0 1.5px var(--brass)}
+  .key .k-start{border:1.5px dashed rgba(230,220,195,.5)}
+  .key .k-pass{color:var(--brass);font-size:12px;line-height:13px;text-align:center}
   .dice{display:flex;gap:10px;align-items:center;justify-content:center;margin:6px 0 14px}
   .die{width:44px;height:44px;border:1px solid var(--brass);border-radius:4px;background:rgba(201,162,39,.1);
     display:flex;align-items:center;justify-content:center;font-size:26px;line-height:1;color:var(--brass)}
-  .legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .legend{display:flex;flex-wrap:wrap;gap:9px;margin-top:10px}
   .legend span{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--chart-dim)}
+  .legend .is-me{color:var(--chart);font-weight:600}
   @media (prefers-reduced-motion:no-preference){
     .card,.plate,.lock{animation:rise .28s ease-out both}
     @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -127,9 +149,12 @@ const DB_URL = "https://boat-clue-default-rtdb.firebaseio.com";
 
 /* ---------------- defaults ---------------- */
 const DEFAULTS = {
-  suspects:["The Captain","The Deckhand","The Heiress","The Chef","The Stowaway","The Harbormaster","The Diver","The Widow"],
-  weapons:["Anchor chain","Fillet knife","Mooring rope","Champagne bottle","Fire extinguisher","Boat hook","Winch handle","Ice pick"],
-  rooms:["Bow","Stern","Galley","Head","Cabin","Flybridge","Engine room","Swim platform","Saloon"]
+  suspects:["The Harbormaster","The Lifeguard","The Charter Captain","The Boardwalk Psychic",
+            "The Ice Cream Man","The Deckhand","The Marina Widow","The Dockside Bookie"],
+  weapons:["Anchor","Boat oar","Fishing rod","Beach umbrella",
+           "Rope","Fillet knife","Fire extinguisher","Tiki torch"],
+  rooms:["Boardwalk","Tackle Shop","Marine Supply","Shell Shop","T-Shirt Shack",
+         "Dive Locker","Ferry Landing","Arcade","Lighthouse"]
 };
 const COLORS=["#C9A227","#B0463C","#6E9C94","#7B6CA8","#4E86C6","#D08A4A","#8FAE5A","#C87BA0"];
 const PIPS=["","\u2680","\u2681","\u2682","\u2683","\u2684","\u2685"];
@@ -246,7 +271,7 @@ const TEMPLATE={
 
 function buildBoard(rooms){
   const list=rooms.slice(0,TEMPLATE.slots.length);
-  const roomAt={},doorOwner={},blocked={};
+  const roomAt={},doorOwner={},doorSide={},blocked={};
   list.forEach((name,i)=>{
     const s=TEMPLATE.slots[i];
     roomAt[name]={key:s.key,x0:s.x0,y0:s.y0,w:s.x1-s.x0+1,h:s.y1-s.y0+1,doors:s.doors.slice(),pass:null};
@@ -257,7 +282,13 @@ function buildBoard(rooms){
   list.forEach(name=>{
     const R=roomAt[name];
     R.doors=R.doors.filter(d=>cells[d]);
-    R.doors.forEach(d=>{ doorOwner[d]=name; });
+    R.doors.forEach(d=>{
+      doorOwner[d]=name;
+      const p=d.split(",").map(Number);
+      doorSide[d] = blocked[K(p[0],p[1]-1)]===name ? "n"
+                  : blocked[K(p[0],p[1]+1)]===name ? "s"
+                  : blocked[K(p[0]-1,p[1])]===name ? "w" : "e";
+    });
   });
   /* secret passages, only where both corner rooms are in play */
   const byKey={}; list.forEach((n,i)=>{ byKey[TEMPLATE.slots[i].key]=n; });
@@ -267,7 +298,7 @@ function buildBoard(rooms){
   });
   const ring=TEMPLATE.starts.filter(k=>cells[k]);
   const startSet={}; ring.forEach(k=>{ startSet[k]=true; });
-  return {W:TEMPLATE.W,H:TEMPLATE.H,cells:cells,rooms:roomAt,doorOwner:doorOwner,
+  return {W:TEMPLATE.W,H:TEMPLATE.H,cells:cells,rooms:roomAt,doorOwner:doorOwner,doorSide:doorSide,
           list:list,ring:ring,startSet:startSet};
 }
 
@@ -503,10 +534,11 @@ function hand(){
 }
 
 /* ---------- board rendering ---------- */
-function pawnFor(p){
-  return '<i class="pawn" style="background:'+(p.color||"#C9A227")+'">'+esc((p.name||"?").charAt(0).toUpperCase())+'</i>';
+function pawnFor(p,meId){
+  return '<i class="pawn'+(p.id===meId?" me":"")+(p.out?" gone":"")+'" style="background:'+(p.color||"#C9A227")+
+    '" title="'+esc(p.name)+'">'+esc((p.name||"?").charAt(0).toUpperCase())+'</i>';
 }
-function boardView(g,go){
+function boardView(g,go,meId){
   const b=buildBoard(g.setup.rooms);
   const here={};
   g.players.forEach(p=>{
@@ -515,15 +547,19 @@ function boardView(g,go){
     (here[k]=here[k]||[]).push(p);
   });
   let html='<div class="board" style="grid-template-columns:repeat('+b.W+',1fr);aspect-ratio:'+b.W+'/'+b.H+'">';
-  /* floor first, so rooms sit on top of it */
+  /* floor first, rooms layered on top */
   for(let y=0;y<b.H;y++) for(let x=0;x<b.W;x++){
     const k=K(x,y); if(!b.cells[k]) continue;
     const on=go&&go.cells&&(k in go.cells);
     const occ=here[k]||[];
-    const cls="cell"+(((x+y)%2)?" alt":"")+(b.doorOwner[k]?" door":"")+
-      (b.startSet[k]?" start":"")+(on?" go":"");
+    const cls="cell"+(((x+y)%2)?" alt":"")+
+      (b.doorOwner[k]?" door "+b.doorSide[k]:"")+
+      (b.startSet[k]?" start":"")+(on?" go":"")+(occ.length?" busy":"");
     html+='<div class="'+cls+'" style="grid-column:'+(x+1)+';grid-row:'+(y+1)+'"'+
-      (on?' data-a="move" data-v="'+k+'"':"")+'>'+(occ.length?pawnFor(occ[0]):"")+'</div>';
+      (on?' data-a="move" data-v="'+k+'"':"")+'>'+
+      (occ.length?pawnFor(occ[0],meId):"")+
+      (occ.length>1?'<b class="more">+'+(occ.length-1)+'</b>':"")+
+      '</div>';
   }
   b.list.forEach(name=>{
     const R=b.rooms[name], on=go&&go.rooms&&(name in go.rooms);
@@ -531,14 +567,22 @@ function boardView(g,go){
     html+='<div class="room'+(on?" go":"")+'" style="grid-column:'+(R.x0+1)+'/span '+R.w+
       ';grid-row:'+(R.y0+1)+'/span '+R.h+'"'+
       (on?' data-a="move" data-v="room:'+esc(name)+'"':"")+'>'+
-      (R.pass?'<span class="pass" title="secret passage">\u21C4</span>':"")+
+      (R.pass?'<span class="pass" title="Secret passage to the '+esc(R.pass)+'">\u21C4</span>':"")+
       '<span class="rname">'+esc(name)+'</span>'+
-      (occ.length?'<span class="pawns">'+occ.map(pawnFor).join("")+'</span>':"")+
+      (occ.length?'<span class="pawns">'+occ.map(p=>pawnFor(p,meId)).join("")+'</span>':"")+
+      (on?'<span class="enter">Enter</span>':"")+
       '</div>';
   });
   html+='</div>';
-  html+='<div class="legend">'+g.players.map(p=>'<span>'+pawnFor(p)+esc(p.name)+
-    (p.char?' <span class="tag">'+esc(p.char)+'</span>':"")+(p.out?' <span class="tag" style="color:var(--signal)">OUT</span>':"")+'</span>').join("")+'</div>';
+  html+='<div class="key">'+
+    '<span><i class="k-door"></i>Door</span>'+
+    '<span><i class="k-go"></i>Where you can go</span>'+
+    '<span><i class="k-start"></i>Start square</span>'+
+    '<span><i class="k-pass">\u21C4</i>Secret passage</span></div>';
+  html+='<div class="legend">'+g.players.map(p=>'<span'+(p.id===meId?' class="is-me"':"")+'>'+pawnFor(p,meId)+esc(p.name)+
+    (p.id===meId?" (you)":"")+
+    (p.char?' <span class="tag">'+esc(p.char)+'</span>':"")+
+    (p.out?' <span class="tag" style="color:var(--signal)">OUT</span>':"")+'</span>').join("")+'</div>';
   return html;
 }
 
@@ -582,7 +626,7 @@ function table(){
       <div class="eyebrow">In progress</div>
       <div class="big" style="font-size:23px;margin-bottom:12px">${line}</div>
       <p class="note">Asked by ${esc(asker?asker.name:"someone")}. ${dis?"Waiting on "+esc(dis.name)+" to show a card.":"Waiting on them."}</p>
-    </div>${g.board?boardView(g,null):""}${hand()}`;
+    </div>${g.board?boardView(g,null,meId):""}${hand()}`;
   }
 
   const cur=byId(g,g.order[g.turn]);
@@ -596,7 +640,7 @@ function table(){
     const b=buildBoard(g.setup.rooms);
     let go=null;
     if(myTurn&&ts.roll&&!ts.moved&&me.pos) go=reachable(b,me.pos,ts.roll);
-    boardBlock=boardView(g,go);
+    boardBlock=boardView(g,go,meId);
     if(myTurn){
       const inRoom=roomOf(me);
       const passTo=inRoom&&b.rooms[inRoom]?b.rooms[inRoom].pass:null;
@@ -629,7 +673,8 @@ function table(){
   <div class="card">
     <div class="eyebrow">Now playing</div>
     <div class="big" style="${myTurn?"color:var(--brass)":""}">${myTurn?"Your turn":esc(cur?cur.name:"—")+"'s turn"}</div>
-    ${g.board&&me.char?'<p class="note" style="margin-bottom:0">You\'re playing '+esc(me.char)+'.</p>':""}
+    ${g.board&&me.char?'<p class="note" style="margin-bottom:0">You\'re playing '+esc(me.char)+
+      ' &middot; '+(roomOf(me)?'in the <b style="color:var(--chart)">'+esc(roomOf(me))+'</b>':'out on the boardwalk, between rooms')+'</p>':""}
     ${me.out?'<p class="note" style="color:var(--signal);margin-bottom:0">You accused wrong. You still show cards, but your turns are over.</p>':""}
   </div>
   ${boardBlock}
