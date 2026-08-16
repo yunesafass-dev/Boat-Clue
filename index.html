@@ -76,6 +76,28 @@
     display:flex;justify-content:space-between;align-items:center}
   .footer button{background:transparent;border:none;color:var(--chart-dim);font-family:var(--mono);
     font-size:11px;letter-spacing:.16em;text-transform:uppercase;padding:4px 0}
+
+  /* ---- board ---- */
+  .board{display:grid;width:100%;gap:1px;background:rgba(8,25,31,.7);
+    border:1px solid rgba(201,162,39,.3);padding:1px;border-radius:2px;margin-bottom:14px}
+  .cell{background:rgba(20,63,76,.35);position:relative;display:flex;align-items:center;justify-content:center}
+  .cell.door{background:rgba(201,162,39,.2)}
+  .cell.go,.room.go{background:rgba(201,162,39,.5);cursor:pointer;box-shadow:inset 0 0 0 1px var(--brass)}
+  .room{background:rgba(15,49,59,.9);border:1px solid rgba(201,162,39,.35);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2px;overflow:hidden;position:relative}
+  .room .rname{font-family:var(--mono);font-size:8px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--chart-dim);text-align:center;line-height:1.15;word-break:break-word}
+  .room.go .rname{color:var(--ink)}
+  .room .pass{position:absolute;top:1px;right:2px;font-size:8px;color:var(--brass)}
+  .pawns{display:flex;flex-wrap:wrap;gap:1px;justify-content:center;margin-top:1px}
+  .pawn{width:11px;height:11px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:7px;font-weight:700;color:#08191F;font-style:normal;flex:none}
+  .cell .pawn{position:absolute;width:70%;height:70%;font-size:8px}
+  .dice{display:flex;gap:10px;align-items:center;justify-content:center;margin:6px 0 14px}
+  .die{width:44px;height:44px;border:1px solid var(--brass);border-radius:4px;background:rgba(201,162,39,.1);
+    display:flex;align-items:center;justify-content:center;font-size:26px;line-height:1;color:var(--brass)}
+  .legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .legend span{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--chart-dim)}
   @media (prefers-reduced-motion:no-preference){
     .card,.plate,.lock{animation:rise .28s ease-out both}
     @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -87,21 +109,21 @@
 
 <script>
 /* ============================================================
-   THE SHIP'S MANIFEST — real-life Clue, dealt by the phone.
-   Single file. Drop in a GitHub repo, turn on Pages, done.
+   THE SHIP'S MANIFEST — Clue, dealt by the phone.
 
    Paste your Firebase Realtime Database URL below. No trailing
-   slash. Nothing else to configure — this talks to Firebase
-   over plain REST, so there's no SDK and no app registration.
+   slash. Plain REST, so no SDK and no app registration.
    ============================================================ */
-const DB_URL = "https://boat-clue-default-rtdb.firebaseio.com/";
+const DB_URL = "https://boat-clue-default-rtdb.firebaseio.com";
 
 /* ---------------- defaults ---------------- */
 const DEFAULTS = {
   suspects:["The Captain","The Deckhand","The Heiress","The Chef","The Stowaway","The Harbormaster","The Diver","The Widow"],
   weapons:["Anchor chain","Fillet knife","Mooring rope","Champagne bottle","Fire extinguisher","Boat hook","Winch handle","Ice pick"],
-  rooms:["Bow","Stern","Galley","Head","Cabin","Flybridge","Engine room","Swim platform"]
+  rooms:["Bow","Stern","Galley","Head","Cabin","Flybridge","Engine room","Swim platform","Saloon"]
 };
+const COLORS=["#C9A227","#B0463C","#6E9C94","#7B6CA8","#4E86C6","#D08A4A","#8FAE5A","#C87BA0"];
+const PIPS=["","\u2680","\u2681","\u2682","\u2683","\u2684","\u2685"];
 
 /* ---------------- helpers ---------------- */
 const LETTERS="ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -111,13 +133,12 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"
 const shuffle=a=>{const x=[...a];for(let i=x.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[x[i],x[j]]=[x[j],x[i]];}return x;};
 const byId=(g,id)=>g.players.find(p=>p.id===id);
 const clone=o=>JSON.parse(JSON.stringify(o));
+const d6=()=>1+Math.floor(Math.random()*6);
 
 /* ---------------- state ---------------- */
 const S={
   screen:"home", mode:null, code:null,
-  me:null,        // online: {id,name}
-  viewer:null,    // pass-and-play: whose eyes are on the phone
-  game:null,
+  me:null, viewer:null, game:null,
   tab:"play", turnMode:"ask", confirm:false, err:"", ok:"",
   nameIn:"", codeIn:"",
   pick:{}, notes:{}, busy:false, lastSync:""
@@ -136,75 +157,130 @@ function clearLocal(){try{localStorage.removeItem(LS)}catch(e){}}
 /* ---------------- network ---------------- */
 const netOn=()=>!!DB_URL;
 const url=c=>DB_URL.replace(/\/+$/,"")+"/games/"+encodeURIComponent(c)+".json";
+const httpMsg=s=>(s===401||s===403)?"permission denied, check your database Rules":"HTTP "+s;
 
 async function netGet(c){
   const r=await fetch(url(c)+"?t="+Date.now(),{cache:"no-store"});
-  if(!r.ok) throw new Error(r.status===401||r.status===403?"permission denied, check your database Rules":"HTTP "+r.status);
+  if(!r.ok) throw new Error(httpMsg(r.status));
   const j=await r.json();
   if(j===null||j===undefined) return null;
   if(typeof j!=="string") throw new Error("that record isn't a game");
   return JSON.parse(j);
 }
 async function netPut(g){
-  const r=await fetch(url(g.code),{
-    method:"PUT",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify(JSON.stringify(g))
-  });
-  if(!r.ok) throw new Error(r.status===401||r.status===403?"permission denied, check your database Rules":"HTTP "+r.status);
+  const r=await fetch(url(g.code),{method:"PUT",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(JSON.stringify(g))});
+  if(!r.ok) throw new Error(httpMsg(r.status));
 }
 
-/* apply a change to the game, wherever it lives */
 async function mutate(fn,opts){
   opts=opts||{};
   if(S.mode==="local"){
-    fn(S.game); S.lastSync=JSON.stringify(S.game);
-    saveLocal(); if(!opts.quiet) render();
+    fn(S.game); S.lastSync=JSON.stringify(S.game); saveLocal();
+    if(!opts.quiet) render();
     return true;
   }
   if(S.busy) return false;
-  S.busy=true;
-  let good=false;
+  S.busy=true; let good=false;
   try{
     const g=await netGet(S.code);
     if(!g) throw new Error("that game is no longer on the database");
-    fn(g);
-    await netPut(g);
+    fn(g); await netPut(g);
     S.game=g; S.lastSync=JSON.stringify(g); S.err=""; good=true;
-  }catch(e){
-    S.err="Couldn't save that — "+e.message+".";
-  }
+  }catch(e){ S.err="Couldn't save that — "+e.message+"."; }
   S.busy=false; saveLocal();
   if(!opts.quiet||!good) render();
   return good;
 }
 
-/* don't yank the screen out from under someone who's typing */
 function typing(){
   const a=document.activeElement;
   return !!a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
 }
-
 let poller=null;
 function startPolling(){
   stopPolling();
   poller=setInterval(async()=>{
     if(S.busy||S.mode!=="online"||!S.code) return;
     try{
-      const g=await netGet(S.code);
-      if(!g) return;
-      const sig=JSON.stringify(g);
-      S.game=g;
+      const g=await netGet(S.code); if(!g) return;
+      const sig=JSON.stringify(g); S.game=g;
       if(sig!==S.lastSync){ S.lastSync=sig; S.err=""; if(!typing()) render(); }
     }catch(e){}
   },2500);
 }
 function stopPolling(){ if(poller) clearInterval(poller); poller=null; }
 
+/* ============================================================
+   BOARD — generated from the room list, same on every device
+   ============================================================ */
+const K=(x,y)=>x+","+y;
+function buildBoard(rooms){
+  const list=rooms.slice(0,9);
+  const N=list.length;
+  const cols = N<=2?1 : N<=4?2 : 3;
+  const rows = Math.ceil(N/cols);
+  const W=cols*4+1, H=rows*3+1;
+  const roomAt={}, doorOwner={}, blocked={};
+  list.forEach((name,i)=>{
+    const c=i%cols, r=Math.floor(i/cols);
+    const x0=c*4+1, y0=r*3+1;
+    const doors=[K(x0+1,y0-1),K(x0+1,y0+2)];
+    roomAt[name]={i,x0,y0,doors,pass:null};
+    doors.forEach(d=>{ doorOwner[d]=name; });
+    for(let x=x0;x<=x0+2;x++) for(let y=y0;y<=y0+1;y++) blocked[K(x,y)]=name;
+  });
+  const cells={};
+  for(let x=0;x<W;x++) for(let y=0;y<H;y++) if(!blocked[K(x,y)]) cells[K(x,y)]=true;
+  /* secret passages between opposite corner rooms */
+  if(N>=4&&cols>=2&&rows>=2){
+    const tl=list[0], tr=list[cols-1], bl=list[(rows-1)*cols], br=list[N-1];
+    const link=(a,b)=>{ if(a&&b&&a!==b&&roomAt[a]&&roomAt[b]&&!roomAt[a].pass&&!roomAt[b].pass){
+      roomAt[a].pass=b; roomAt[b].pass=a; } };
+    link(tl,br); link(tr,bl);
+  }
+  /* evenly spaced starting squares around the outside */
+  const ring=[];
+  for(let x=0;x<W;x++) if(cells[K(x,0)]) ring.push(K(x,0));
+  for(let y=1;y<H;y++) if(cells[K(W-1,y)]) ring.push(K(W-1,y));
+  for(let x=W-2;x>=0;x--) if(cells[K(x,H-1)]) ring.push(K(x,H-1));
+  for(let y=H-2;y>0;y--) if(cells[K(0,y)]) ring.push(K(0,y));
+  return {W,H,cells,rooms:roomAt,doorOwner,list,ring};
+}
+
+/* where can this player go with `steps` moves? */
+function reachable(b,pos,steps){
+  const seen={}, out={cells:{},rooms:{}};
+  const startRoom = pos && pos.room ? pos.room : null;
+  const q=[];
+  if(startRoom){
+    const R=b.rooms[startRoom]; if(!R) return out;
+    R.doors.forEach(d=>{ if(b.cells[d]&&!(d in seen)&&1<=steps){ seen[d]=1; q.push(d); } });
+  }else{
+    const k=K(pos.x,pos.y); seen[k]=0; q.push(k);
+  }
+  while(q.length){
+    const k=q.shift(), d=seen[k];
+    if(d>0) out.cells[k]=d;
+    const owner=b.doorOwner[k];
+    if(owner&&owner!==startRoom&&d+1<=steps){
+      if(!(owner in out.rooms)||out.rooms[owner]>d+1) out.rooms[owner]=d+1;
+    }
+    if(d>=steps) continue;
+    const p=k.split(",").map(Number);
+    [[1,0],[-1,0],[0,1],[0,-1]].forEach(v=>{
+      const n=K(p[0]+v[0],p[1]+v[1]);
+      if(b.cells[n]&&!(n in seen)){ seen[n]=d+1; q.push(n); }
+    });
+  }
+  return out;
+}
+
 /* ---------------- game logic ---------------- */
 function makeGame(code,players){
   return{code:code,phase:"lobby",hostId:players.length?players[0].id:null,players:players,
-    setup:clone(DEFAULTS),order:[],turn:0,pending:null,log:[],solution:null,winner:null};
+    setup:clone(DEFAULTS),board:true,order:[],turn:0,ts:{roll:null,moved:false},
+    pending:null,log:[],solution:null,winner:null};
 }
 function setupProblems(g){
   const all=[].concat(g.setup.suspects,g.setup.weapons,g.setup.rooms);
@@ -214,6 +290,11 @@ function setupProblems(g){
   ["suspects","weapons","rooms"].forEach(k=>{ if(g.setup[k].length<3) out.push("Add at least three "+k+"."); });
   if(dup) out.push('Every name has to be different — "'+dup+'" appears twice.');
   if(all.length-3<g.players.length) out.push("Not enough cards to give everyone one. Add more.");
+  if(g.board){
+    if(g.setup.rooms.length>9) out.push("The board fits nine rooms. Trim the list or switch to in-person mode.");
+    if(g.setup.rooms.length<4) out.push("The board needs at least four rooms.");
+    if(g.setup.suspects.length<g.players.length) out.push("Board mode gives everyone a character, so you need at least as many suspects as players.");
+  }
   return out;
 }
 function deal(g){
@@ -222,19 +303,33 @@ function deal(g){
   const deck=shuffle([].concat(g.setup.suspects,g.setup.weapons,g.setup.rooms)
     .filter(c=>c!==sol.suspect&&c!==sol.weapon&&c!==sol.room));
   g.order=shuffle(g.players.map(p=>p.id));
-  g.players.forEach(p=>{p.hand=[];p.out=false;});
+  g.players.forEach(p=>{p.hand=[];p.out=false;p.pulled=false;p.char=null;p.pos=null;});
   deck.forEach((c,i)=>byId(g,g.order[i%g.order.length]).hand.push(c));
+  if(g.board){
+    const b=buildBoard(g.setup.rooms);
+    const chars=shuffle(g.setup.suspects);
+    g.order.forEach((id,i)=>{
+      const p=byId(g,id);
+      p.char=chars[i%chars.length];
+      p.color=COLORS[i%COLORS.length];
+      const k=b.ring[Math.floor(i*b.ring.length/g.order.length)%b.ring.length];
+      const xy=k.split(",").map(Number);
+      p.pos={x:xy[0],y:xy[1]};
+    });
+  }
   g.solution=sol; g.phase="playing"; g.turn=0; g.pending=null; g.winner=null;
+  g.ts={roll:null,moved:false};
   g.log=[{t:"start",names:g.order.map(id=>byId(g,id).name)}];
 }
 function advance(g){
+  const prev=byId(g,g.order[g.turn]); if(prev) prev.pulled=false;
+  g.ts={roll:null,moved:false};
   for(let i=1;i<=g.order.length;i++){
     const idx=(g.turn+i)%g.order.length;
     if(!byId(g,g.order[idx]).out){ g.turn=idx; return; }
   }
   g.phase="over"; g.winner="nobody";
 }
-/* who the phone is waiting on right now */
 function actorId(g){
   const p=g.pending;
   if(p) return (p.disproverId&&!p.card)?p.disproverId:p.by;
@@ -242,13 +337,18 @@ function actorId(g){
 }
 const myId=()=>S.mode==="local"?S.viewer:(S.me?S.me.id:null);
 const notesFor=id=>(S.notes[id]=S.notes[id]||{});
+const roomOf=p=>(p&&p.pos&&p.pos.room)?p.pos.room:null;
 
-/* keep the three dropdowns pointing at cards that still exist */
 function syncPick(g){
   const map={s:"suspects",w:"weapons",r:"rooms"};
   for(const k in map){
     if(!g.setup[map[k]].includes(S.pick[k])){ S.pick[k]=g.setup[map[k]][0]; S.confirm=false; }
   }
+}
+/* may this player ask right now? */
+function canAsk(g,p){
+  if(!g.board) return true;
+  return !!roomOf(p) && (g.ts.moved || p.pulled);
 }
 
 /* ============================================================
@@ -261,13 +361,11 @@ const okBar=()=>S.ok?'<div class="ok">'+esc(S.ok)+'</div>':"";
 
 function view(){
   if(S.screen==="home") return home();
-  if(!S.game) return '<p class="note">Reaching the database…</p>'+
-    '<button class="btn ghost" data-a="reset">Back to the start</button>';
+  if(!S.game) return '<p class="note">Reaching the database…</p><button class="btn ghost" data-a="reset">Back to the start</button>';
   if(S.game.phase==="lobby") return lobby();
   return game();
 }
 
-/* ---------- home ---------- */
 function home(){
   return `
   <div style="margin-bottom:30px">
@@ -275,7 +373,6 @@ function home(){
     <h1>The Ship's<br><em>Manifest</em></h1>
     <p class="lede">A murder, dealt to your phones. Everyone holds a few cards. Nobody holds the answer — not even the host.</p>
   </div>
-
   ${netOn()?`
   <div class="card">
     <div class="eyebrow">Everyone on their own phone</div>
@@ -288,18 +385,15 @@ function home(){
   </div>
   <button class="btn ghost" data-a="ping">Test the database connection</button>`
   :`<div class="err">No database URL set. Open index.html and paste your Firebase URL into <span style="font-family:var(--mono)">DB_URL</span> near the top of the script. Until then only the one-phone game works.</div>`}
-
   <div class="rule"></div>
   <div class="card">
     <div class="eyebrow">One phone, passed around</div>
-    <p class="note" style="margin-top:0">Works with no signal at all. Each player taps their name to see their hand, then passes it on.</p>
+    <p class="note" style="margin-top:0">Works with no signal at all. Each player taps their name to take a turn, then passes it on.</p>
     <button class="btn ghost" data-a="localSetup">Play on this phone</button>
   </div>
-
   ${okBar()}${errBar()}`;
 }
 
-/* ---------- lobby ---------- */
 function lobby(){
   const g=S.game;
   const isHost = S.mode==="local" || (S.me && g.hostId===S.me.id);
@@ -312,15 +406,24 @@ function lobby(){
       <span class="tag">${(S.mode==="online"&&p.id===g.hostId)?"HOST ":""}${(S.mode==="online"&&S.me&&p.id===S.me.id)?"YOU":""}</span></div>`).join("")
       :'<p class="note" style="margin:0">Nobody yet.</p>'}
   </div>
-
   ${S.mode==="local"?`
   <label><div class="eyebrow">Add a player</div><input id="addName" maxlength="18" placeholder="Name" autocomplete="off"></label>
   <button class="btn ghost" data-a="addPlayer">Add to the table</button>`:""}
-
   ${isHost?`
   <div class="rule"></div>
+  <div class="eyebrow">How you're playing</div>
+  <div class="seg">
+    <button data-a="board" data-v="1" aria-selected="${!!g.board}">On a board</button>
+    <button data-a="board" data-v="0" aria-selected="${!g.board}">In real rooms</button>
+  </div>
+  <p class="note" style="margin-top:0">${g.board
+    ?"Dice, pawns, corridors, secret passages. You can only accuse the room you're standing in."
+    :"No board. Walk to the actual room you're naming and say it out loud."}</p>
+  <div class="rule"></div>
   <div class="eyebrow">The deck — one per line</div>
-  <p class="note" style="margin-top:0">Swap these for real people and real places around you. Rooms should be spots someone can actually stand in — that's the whole point of playing it live. Tap away from a box to save it.</p>
+  <p class="note" style="margin-top:0">${g.board
+    ?"Four to nine rooms. Everything else is up to you. Tap away from a box to save it."
+    :"Swap these for real people and real places around you. Tap away from a box to save it."}</p>
   ${["suspects","weapons","rooms"].map(k=>`
     <div style="margin-bottom:14px">
       <div class="eyebrow">${k}</div>
@@ -329,8 +432,7 @@ function lobby(){
   ${probs.length?'<div class="err">'+esc(probs[0])+'</div>':""}
   <button class="btn" data-a="deal" ${probs.length?"disabled":""}>Deal the cards</button>
   `:'<p class="note">Waiting for the host to deal. This updates on its own.</p>'}
-  ${errBar()}
-  ${footer()}`;
+  ${errBar()}${footer()}`;
 }
 
 function footer(){
@@ -340,14 +442,11 @@ function footer(){
   </div>`;
 }
 
-/* ---------- game ---------- */
 function game(){
   const g=S.game;
-
   if(S.mode==="online"&&(!S.me||!byId(g,S.me.id)))
     return '<div class="err">You\'re not in this game any more. The host may have restarted it.</div>'+
       '<button class="btn ghost" data-a="reset">Back to the start</button>';
-
   if(S.mode==="local"&&g.phase!=="over"&&S.viewer!==actorId(g)){
     const who=byId(g,actorId(g));
     if(!who) return '<div class="err">Lost track of whose turn it is.</div><button class="btn ghost" data-a="reset">Back to the start</button>';
@@ -358,13 +457,11 @@ function game(){
       <button class="btn" data-a="unlock">I'm ${esc(who.name)}</button>
     </div>${footer()}`;
   }
-
   const tabs=[["play","Table"],["notes","Notepad"],["log","Record"]];
   return `
   <div class="tabs">${tabs.map(t=>`<button data-a="tab" data-v="${t[0]}" aria-selected="${S.tab===t[0]}">${t[1]}</button>`).join("")}</div>
   ${S.tab==="play"?table():S.tab==="notes"?notepad():logView()}
-  ${errBar()}
-  ${footer()}`;
+  ${errBar()}${footer()}`;
 }
 
 function hand(){
@@ -373,6 +470,42 @@ function hand(){
   return `<div class="card"><div class="eyebrow">Your hand — nobody else sees this</div>
     <div class="chips">${me.hand.length?me.hand.map(c=>'<span class="chip">'+esc(c)+'</span>').join("")
       :'<span class="note">No cards. Everything else is in play.</span>'}</div></div>`;
+}
+
+/* ---------- board rendering ---------- */
+function pawnFor(p){
+  return '<i class="pawn" style="background:'+(p.color||"#C9A227")+'">'+esc((p.name||"?").charAt(0).toUpperCase())+'</i>';
+}
+function boardView(g,go){
+  const b=buildBoard(g.setup.rooms);
+  const here={};
+  g.players.forEach(p=>{
+    if(!p.pos) return;
+    const k=p.pos.room?("room:"+p.pos.room):K(p.pos.x,p.pos.y);
+    (here[k]=here[k]||[]).push(p);
+  });
+  let html='<div class="board" style="grid-template-columns:repeat('+b.W+',1fr);aspect-ratio:'+b.W+'/'+b.H+'">';
+  b.list.forEach(name=>{
+    const R=b.rooms[name], on=go&&go.rooms&&(name in go.rooms);
+    const occ=here["room:"+name]||[];
+    html+='<div class="room'+(on?" go":"")+'" style="grid-column:'+(R.x0+1)+'/span 3;grid-row:'+(R.y0+1)+'/span 2"'+
+      (on?' data-a="move" data-v="room:'+esc(name)+'"':"")+'>'+
+      (R.pass?'<span class="pass">\u21C4</span>':"")+
+      '<span class="rname">'+esc(name)+'</span>'+
+      (occ.length?'<span class="pawns">'+occ.map(pawnFor).join("")+'</span>':"")+
+      '</div>';
+  });
+  for(let y=0;y<b.H;y++) for(let x=0;x<b.W;x++){
+    const k=K(x,y); if(!b.cells[k]) continue;
+    const on=go&&go.cells&&(k in go.cells);
+    const occ=here[k]||[];
+    html+='<div class="cell'+(b.doorOwner[k]?" door":"")+(on?" go":"")+'" style="grid-column:'+(x+1)+';grid-row:'+(y+1)+'"'+
+      (on?' data-a="move" data-v="'+k+'"':"")+'>'+(occ.length?pawnFor(occ[0]):"")+'</div>';
+  }
+  html+='</div>';
+  html+='<div class="legend">'+g.players.map(p=>'<span>'+pawnFor(p)+esc(p.name)+
+    (p.char?' <span class="tag">'+esc(p.char)+'</span>':"")+(p.out?' <span class="tag" style="color:var(--signal)">OUT</span>':"")+'</span>').join("")+'</div>';
+  return html;
 }
 
 function table(){
@@ -393,12 +526,11 @@ function table(){
   if(p){
     const asker=byId(g,p.by), dis=p.disproverId?byId(g,p.disproverId):null;
     const line=esc(p.suggestion.suspect)+", in the "+esc(p.suggestion.room)+", with the "+esc(p.suggestion.weapon);
-
     if(dis&&!p.card&&dis.id===meId){
       return `<div class="card" style="padding:22px">
         <div class="eyebrow">You must disprove</div>
         <div class="big" style="font-size:24px;margin-bottom:6px">${line}</div>
-        <p class="note" style="margin-bottom:18px">${esc(asker.name)} asked. Show one card — only ${esc(asker.name)} sees it.</p>
+        <p class="note" style="margin-bottom:18px">${esc(asker?asker.name:"Someone")} asked. Show one card — only they see it.</p>
         ${(p.matches||[]).map(c=>'<button class="btn" data-a="show" data-v="'+esc(c)+'">Show '+esc(c)+'</button>').join("")}
       </div>`;
     }
@@ -415,24 +547,57 @@ function table(){
     return `<div class="card" style="padding:22px">
       <div class="eyebrow">In progress</div>
       <div class="big" style="font-size:23px;margin-bottom:12px">${line}</div>
-      <p class="note">Asked by ${esc(asker?asker.name:"someone")}. ${dis?"Waiting on "+esc(dis.name)+" to show a card.":"Waiting on "+esc(asker?asker.name:"them")+"."}</p>
-    </div>${hand()}`;
+      <p class="note">Asked by ${esc(asker?asker.name:"someone")}. ${dis?"Waiting on "+esc(dis.name)+" to show a card.":"Waiting on them."}</p>
+    </div>${g.board?boardView(g,null):""}${hand()}`;
   }
 
   const cur=byId(g,g.order[g.turn]);
   const myTurn = !!cur && cur.id===meId && !me.out;
   syncPick(g);
-  const sel=(label,k,opts)=>`<div style="margin-bottom:12px"><div class="eyebrow">${label}</div>
-    <select data-pick="${k}">${opts.map(o=>'<option value="'+esc(o)+'"'+(S.pick[k]===o?" selected":"")+'>'+esc(o)+'</option>').join("")}</select></div>`;
+
+  /* board mode: roll, then move */
+  let boardBlock="", moveBlock="";
+  if(g.board){
+    const b=buildBoard(g.setup.rooms);
+    let go=null;
+    if(myTurn&&g.ts.roll&&!g.ts.moved&&me.pos) go=reachable(b,me.pos,g.ts.roll);
+    boardBlock=boardView(g,go);
+    if(myTurn){
+      const inRoom=roomOf(me);
+      const passTo=inRoom&&b.rooms[inRoom]?b.rooms[inRoom].pass:null;
+      if(!g.ts.roll&&!g.ts.moved){
+        moveBlock=`<div class="card">
+          ${me.pulled?'<p class="note" style="margin-top:0;color:var(--brass)">You were pulled into the '+esc(inRoom)+'. You may ask from here without rolling, or roll and move away.</p>':''}
+          <button class="btn" data-a="roll">Roll the dice</button>
+          ${passTo?'<button class="btn ghost" data-a="pass" data-v="'+esc(passTo)+'">Take the secret passage to the '+esc(passTo)+'</button>':''}
+        </div>`;
+      }else if(g.ts.roll&&!g.ts.moved){
+        const n=go?(Object.keys(go.cells).length+Object.keys(go.rooms).length):0;
+        moveBlock=`<div class="card">
+          <div class="eyebrow">You rolled</div>
+          <div class="dice"><span class="die">${PIPS[g.ts.d1]}</span><span class="die">${PIPS[g.ts.d2]}</span>
+            <span class="big" style="margin:0">${g.ts.roll}</span></div>
+          <p class="note" style="margin:0">Tap any glowing square or room — up to ${g.ts.roll} steps. ${n?"":"Nowhere to go; end your turn."}</p>
+          ${n?"":'<button class="btn ghost" data-a="endturn" style="margin-top:12px">End turn</button>'}
+        </div>`;
+      }
+    }
+  }
+
+  const askable = myTurn && canAsk(g,me);
+  const roomNow = g.board ? roomOf(me) : null;
 
   return `
   <div class="card">
     <div class="eyebrow">Now playing</div>
     <div class="big" style="${myTurn?"color:var(--brass)":""}">${myTurn?"Your turn":esc(cur?cur.name:"—")+"'s turn"}</div>
+    ${g.board&&me.char?'<p class="note" style="margin-bottom:0">You\'re playing '+esc(me.char)+'.</p>':""}
     ${me.out?'<p class="note" style="color:var(--signal);margin-bottom:0">You accused wrong. You still show cards, but your turns are over.</p>':""}
   </div>
+  ${boardBlock}
+  ${moveBlock}
   ${hand()}
-  ${myTurn?`
+  ${myTurn&&(!g.board||g.ts.moved||me.pulled)?`
   <div class="card">
     <div class="seg">
       <button data-a="mode" data-v="ask" aria-selected="${S.turnMode==="ask"}">Ask the table</button>
@@ -440,29 +605,41 @@ function table(){
     </div>
     ${sel("Suspect","s",g.setup.suspects)}
     ${sel("Weapon","w",g.setup.weapons)}
-    ${sel("Room","r",g.setup.rooms)}
+    ${(g.board&&roomNow&&S.turnMode==="ask")
+      ?'<div style="margin-bottom:12px"><div class="eyebrow">Room</div><div class="chip" style="display:inline-block">'+esc(roomNow)+'</div></div>'
+      :sel("Room","r",g.setup.rooms)}
     ${S.turnMode==="ask"?`
-      <p class="note">Walk to the room you're naming and say it out loud, then tap. The first person who can disprove you gets a private prompt.</p>
-      <button class="btn" data-a="ask">Ask the table</button>`:`
+      <p class="note">${g.board
+        ?(askable?"You're in the "+esc(roomNow)+", so that's the room you're asking about. Naming someone drags their pawn in here."
+                 :"You have to be standing in a room to ask. Move into one first.")
+        :"Walk to the room you're naming and say it out loud, then tap."}</p>
+      <button class="btn" data-a="ask" ${askable?"":"disabled"}>Ask the table</button>
+      ${g.board&&g.ts.moved?'<button class="btn ghost" data-a="endturn">End turn without asking</button>':""}`:`
       <p class="note" style="color:var(--signal)">Right and you win outright. Wrong and you're out — still showing cards, never winning.</p>
       ${S.confirm
         ?'<button class="btn signal" data-a="accuse">Lock it in — '+esc(S.pick.s)+", "+esc(S.pick.r)+", "+esc(S.pick.w)+'</button>'
-        :'<button class="btn ghost" data-a="confirm">Make the accusation</button>'}`}
+        :'<button class="btn ghost" data-a="confirm">Make the accusation</button>'}
+      ${g.board?'<p class="note">An accusation can name any room, wherever you\'re standing.</p>':""}`}
   </div>`:""}`;
+}
+
+function sel(label,k,opts){
+  return '<div style="margin-bottom:12px"><div class="eyebrow">'+label+'</div>'+
+    '<select data-pick="'+k+'">'+opts.map(o=>'<option value="'+esc(o)+'"'+(S.pick[k]===o?" selected":"")+'>'+esc(o)+'</option>').join("")+'</select></div>';
 }
 
 function notepad(){
   const g=S.game, me=byId(g,myId());
   if(!me) return "";
   const n=notesFor(me.id);
-  const group=(title,list)=>`<div style="margin-bottom:20px"><div class="eyebrow">${title}</div>
-    ${list.map(c=>{
+  const group=(title,list)=>'<div style="margin-bottom:20px"><div class="eyebrow">'+title+'</div>'+
+    list.map(c=>{
       const mine=me.hand.includes(c);
       const st=mine?1:(n[c]||0);
       const tag=mine?"IN HAND":st===1?"OUT":st===2?"SUSPECT":"";
       return '<div class="noteline" data-state="'+st+'" '+(mine?"":'data-a="mark" data-v="'+esc(c)+'"')+'>'+
         '<span>'+esc(c)+'</span><span class="tag" data-state="'+st+'">'+tag+'</span></div>';
-    }).join("")}</div>`;
+    }).join("")+'</div>';
   return '<p class="note" style="margin-top:0">Tap a line to cycle it: blank, ruled out, prime suspect. Your own cards are struck out already. This is yours alone.</p>'+
     group("Suspects",g.setup.suspects)+group("Weapons",g.setup.weapons)+group("Rooms",g.setup.rooms);
 }
@@ -470,12 +647,12 @@ function notepad(){
 function logView(){
   const g=S.game, meId=myId();
   if(!g.log||!g.log.length) return '<p class="note">Nothing yet.</p>';
-  return '<div class="eyebrow">The record — everything said out loud</div>' + g.log.map(e=>{
+  return '<div class="eyebrow">The record — everything said out loud</div>'+g.log.map(e=>{
     if(e.t==="start") return '<div class="card"><p class="note" style="margin:0">Cards dealt. Turn order: '+(e.names||[]).map(esc).join(" → ")+'</p></div>';
     if(e.t==="accuse") return '<div class="card"><div style="font-size:15px;line-height:1.5;color:'+(e.right?"var(--brass)":"var(--signal)")+'">'+
       esc(e.byName)+" accused "+esc(e.suggestion.suspect)+", "+esc(e.suggestion.room)+", "+esc(e.suggestion.weapon)+" — "+(e.right?"correct":"wrong, and out")+".</div></div>";
-    const sees = e.by===meId || e.disproverId===meId;
-    const passers = e.passerNames||[];
+    const sees=e.by===meId||e.disproverId===meId;
+    const passers=e.passerNames||[];
     return '<div class="card">'+
       '<div style="font-size:15px;line-height:1.5">'+esc(e.byName)+" asked: "+esc(e.suggestion.suspect)+", in the "+esc(e.suggestion.room)+", with the "+esc(e.suggestion.weapon)+'.</div>'+
       '<p class="note" style="margin:7px 0 0">'+(passers.length?esc(passers.join(", "))+" couldn't disprove. ":"")+
@@ -488,25 +665,21 @@ function logView(){
    ============================================================ */
 document.addEventListener("click",async ev=>{
   const el=ev.target.closest("[data-a]"); if(!el) return;
-  const a=el.dataset.a, v=el.dataset.v;
-  const g=S.game;
+  const a=el.dataset.a, v=el.dataset.v, g=S.game;
   S.ok="";
 
   if(a==="ping"){
     S.err=""; S.ok="Checking…"; render();
     try{
       const r=await fetch(url("__ping")+"?t="+Date.now(),{cache:"no-store"});
-      if(!r.ok) throw new Error(r.status===401||r.status===403?"permission denied — open the Rules tab in Firebase and allow reads":"HTTP "+r.status);
+      if(!r.ok) throw new Error(httpMsg(r.status));
       await r.json();
       S.ok="Database reachable. You're good to go."; S.err="";
-    }catch(e){
-      S.ok=""; S.err="Can't reach the database ("+e.message+"). Check DB_URL for a typo or a trailing slash.";
-    }
+    }catch(e){ S.ok=""; S.err="Can't reach the database ("+e.message+"). Check DB_URL for a typo or a trailing slash."; }
     render(); return;
   }
-  if(a==="localSetup"){
-    S.mode="local"; S.game=makeGame("LOCAL",[]); S.screen="lobby"; S.err=""; render(); return;
-  }
+  if(a==="localSetup"){ S.mode="local"; S.game=makeGame("LOCAL",[]); S.screen="lobby"; S.err=""; render(); return; }
+  if(a==="board"){ await mutate(gm=>{ gm.board = v==="1"; }); return; }
   if(a==="addPlayer"){
     const i=document.getElementById("addName"), name=(i?i.value:"").trim();
     if(!name){ S.err="Type a name first."; render(); return; }
@@ -523,8 +696,7 @@ document.addEventListener("click",async ev=>{
     if(!netOn()){ S.err="No database URL set."; render(); return; }
     const id=newId(), code=newCode();
     const gm=makeGame(code,[{id:id,name:name,hand:[],out:false}]);
-    try{ await netPut(gm); }
-    catch(e){ S.err="Couldn't start a game — "+e.message+"."; render(); return; }
+    try{ await netPut(gm); }catch(e){ S.err="Couldn't start a game — "+e.message+"."; render(); return; }
     S.mode="online"; S.me={id:id,name:name}; S.code=code; S.game=gm; S.lastSync=JSON.stringify(gm);
     S.screen="lobby"; S.err=""; saveLocal(); startPolling(); render(); return;
   }
@@ -535,8 +707,7 @@ document.addEventListener("click",async ev=>{
     if(!name){ S.err="Put your name in first."; render(); return; }
     if(code.length!==4){ S.err="Codes are four letters."; render(); return; }
     let gm;
-    try{ gm=await netGet(code); }
-    catch(e){ S.err="Couldn't reach the database — "+e.message+"."; render(); return; }
+    try{ gm=await netGet(code); }catch(e){ S.err="Couldn't reach the database — "+e.message+"."; render(); return; }
     if(!gm){ S.err="No game under "+code+". Check the code with the host."; render(); return; }
     const existing=gm.players.find(p=>p.name.toLowerCase()===name.toLowerCase());
     if(existing){ S.me={id:existing.id,name:existing.name}; }
@@ -568,13 +739,63 @@ document.addEventListener("click",async ev=>{
     render(); return;
   }
 
+  /* ---- board turns ---- */
+  if(a==="roll"){
+    const meId=myId();
+    await mutate(gm=>{
+      if(gm.order[gm.turn]!==meId||gm.ts.roll||gm.ts.moved) return;
+      const d1=d6(), d2=d6();
+      gm.ts={roll:d1+d2,d1:d1,d2:d2,moved:false};
+    });
+    return;
+  }
+  if(a==="pass"){
+    const meId=myId();
+    await mutate(gm=>{
+      const p=byId(gm,meId);
+      if(gm.order[gm.turn]!==meId||gm.ts.moved||!p||!roomOf(p)) return;
+      const b=buildBoard(gm.setup.rooms), R=b.rooms[roomOf(p)];
+      if(!R||R.pass!==v) return;
+      p.pos={room:v}; gm.ts={roll:null,moved:true};
+    });
+    return;
+  }
+  if(a==="move"){
+    const meId=myId();
+    await mutate(gm=>{
+      const p=byId(gm,meId);
+      if(gm.order[gm.turn]!==meId||!gm.ts.roll||gm.ts.moved||!p||!p.pos) return;
+      const b=buildBoard(gm.setup.rooms);
+      const go=reachable(b,p.pos,gm.ts.roll);
+      if(v.indexOf("room:")===0){
+        const name=v.slice(5);
+        if(!(name in go.rooms)) return;
+        p.pos={room:name};
+      }else{
+        if(!(v in go.cells)) return;
+        const xy=v.split(",").map(Number);
+        p.pos={x:xy[0],y:xy[1]};
+      }
+      gm.ts.moved=true;
+    });
+    return;
+  }
+  if(a==="endturn"){
+    await mutate(gm=>{ if(!gm.pending) advance(gm); });
+    if(S.mode==="local") S.viewer=null;
+    S.confirm=false; render(); return;
+  }
+
   if(a==="ask"){
-    const meId=myId(), sug={suspect:S.pick.s,weapon:S.pick.w,room:S.pick.r};
-    if(!sug.suspect||!sug.weapon||!sug.room){ S.err="Pick all three first."; render(); return; }
+    const meId=myId();
     const ok=await mutate(gm=>{
       if(gm.pending) return;
-      const i=gm.order.indexOf(meId);
-      if(i<0) return;
+      const asker=byId(gm,meId);
+      if(!asker||gm.order[gm.turn]!==meId||!canAsk(gm,asker)) return;
+      const sug={suspect:S.pick.s,weapon:S.pick.w,
+        room: gm.board ? roomOf(asker) : S.pick.r};
+      if(!sug.suspect||!sug.weapon||!sug.room) return;
+      const i=gm.order.indexOf(meId); if(i<0) return;
       const passers=[]; let disproverId=null, matches=[];
       for(let k=1;k<gm.order.length;k++){
         const pl=byId(gm,gm.order[(i+k)%gm.order.length]);
@@ -582,8 +803,14 @@ document.addEventListener("click",async ev=>{
         if(m.length){ disproverId=pl.id; matches=m; break; }
         passers.push(pl.id);
       }
+      /* drag the named character into the room */
+      if(gm.board){
+        const target=gm.players.find(x=>x.char===sug.suspect);
+        if(target&&target.id!==meId){ target.pos={room:sug.room}; target.pulled=true; }
+      }
       gm.pending={by:meId,suggestion:sug,passers:passers,disproverId:disproverId,matches:matches,card:null};
     });
+    if(!ok&&!S.err) S.err="You can't ask from here.";
     if(ok&&S.mode==="local") S.viewer=null;
     render(); return;
   }
@@ -595,8 +822,7 @@ document.addEventListener("click",async ev=>{
   if(a==="closeAsk"){
     const ok=await mutate(gm=>{
       const p=gm.pending; if(!p) return;
-      const askerName=(byId(gm,p.by)||{}).name||"Someone";
-      gm.log.unshift({t:"ask",by:p.by,byName:askerName,suggestion:p.suggestion,
+      gm.log.unshift({t:"ask",by:p.by,byName:(byId(gm,p.by)||{}).name||"Someone",suggestion:p.suggestion,
         passerNames:(p.passers||[]).map(id=>(byId(gm,id)||{}).name||"?"),
         disproverId:p.disproverId||null,
         disproverName:p.disproverId?((byId(gm,p.disproverId)||{}).name||"?"):null,
@@ -607,10 +833,11 @@ document.addEventListener("click",async ev=>{
     S.confirm=false; render(); return;
   }
   if(a==="accuse"){
-    const meId=myId(), sug={suspect:S.pick.s,weapon:S.pick.w,room:S.pick.r};
+    const meId=myId();
     const ok=await mutate(gm=>{
-      const p=byId(gm,meId); if(!p||!gm.solution) return;
-      const right = sug.suspect===gm.solution.suspect && sug.weapon===gm.solution.weapon && sug.room===gm.solution.room;
+      const p=byId(gm,meId); if(!p||!gm.solution||gm.order[gm.turn]!==meId) return;
+      const sug={suspect:S.pick.s,weapon:S.pick.w,room:S.pick.r};
+      const right = sug.suspect===gm.solution.suspect&&sug.weapon===gm.solution.weapon&&sug.room===gm.solution.room;
       gm.log.unshift({t:"accuse",by:meId,byName:p.name,suggestion:sug,right:right});
       if(right){ gm.phase="over"; gm.winner=p.name; }
       else{ p.out=true; advance(gm); }
@@ -621,10 +848,8 @@ document.addEventListener("click",async ev=>{
   }
 });
 
-/* save typed values without re-rendering the world */
 document.addEventListener("change",ev=>{
-  const t=ev.target;
-  if(!t.dataset) return;
+  const t=ev.target; if(!t.dataset) return;
   if(t.dataset.pick){ S.pick[t.dataset.pick]=t.value; S.confirm=false; return; }
   if(t.dataset.list){
     const which=t.dataset.list;
@@ -649,11 +874,8 @@ document.addEventListener("input",ev=>{
       render();
       netGet(saved.code).then(g=>{
         if(g){ S.game=g; S.lastSync=JSON.stringify(g); startPolling(); }
-        else{
-          clearLocal();
-          Object.assign(S,{screen:"home",mode:null,code:null,me:null,game:null});
-          S.err="That game is gone from the database.";
-        }
+        else{ clearLocal(); Object.assign(S,{screen:"home",mode:null,code:null,me:null,game:null});
+              S.err="That game is gone from the database."; }
         render();
       }).catch(e=>{
         Object.assign(S,{screen:"home",mode:null,code:null,me:null,game:null});
