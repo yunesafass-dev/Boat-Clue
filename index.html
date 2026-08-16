@@ -207,6 +207,11 @@ async function netPut(g){
   if(!r.ok) throw new Error(httpMsg(r.status));
 }
 
+async function netDelete(c){
+  const r=await fetch(url(c),{method:"DELETE"});
+  if(!r.ok) throw new Error(httpMsg(r.status));
+}
+
 async function mutate(fn,opts){
   opts=opts||{};
   if(S.mode==="local"){
@@ -399,6 +404,32 @@ function advance(g){
   }
   g.phase="over"; g.winner="nobody";
 }
+/* pull a player out of the game for everyone, not just their own phone */
+function leaveGame(gm,id){
+  const p=byId(gm,id); if(!p) return;
+  if(gm.phase==="lobby"){
+    gm.players=gm.players.filter(x=>x.id!==id);
+    if(gm.hostId===id) gm.hostId = gm.players.length?gm.players[0].id:null;
+    return;
+  }
+  p.wasOut = p.out===true;
+  p.left=true; p.out=true;
+  gm.log.unshift({t:"left",byName:p.name});
+  if(gm.pending){
+    if(gm.pending.by===id){                       /* they asked, then walked */
+      gm.pending=null;
+      if(gm.order[gm.turn]===id) advance(gm);
+    }else if(gm.pending.disproverId===id&&!gm.pending.card){
+      const m=gm.pending.matches||[];             /* their hand answers for them */
+      if(m.length) gm.pending.card=m[0];
+      else{ gm.pending.disproverId=null; gm.pending.matches=[]; }
+    }
+  }else if(gm.order[gm.turn]===id){
+    advance(gm);
+  }
+  if(gm.players.every(x=>x.left)){ gm.phase="over"; gm.winner="nobody"; }
+}
+
 function actorId(g){
   const p=g.pending;
   if(p) return (p.disproverId&&!p.card)?p.disproverId:p.by;
@@ -479,7 +510,7 @@ function lobby(){
   <div class="eyebrow" style="margin-top:26px">Aboard — ${g.players.length} of 8</div>
   <div class="card">
     ${g.players.length?g.players.map(p=>`<div class="row"><span>${esc(p.name)}</span>
-      <span class="tag">${(S.mode==="online"&&p.id===g.hostId)?"HOST ":""}${(S.mode==="online"&&S.me&&p.id===S.me.id)?"YOU":""}</span></div>`).join("")
+      <span class="tag">${p.left?"LEFT ":""}${(S.mode==="online"&&p.id===g.hostId)?"HOST ":""}${(S.mode==="online"&&S.me&&p.id===S.me.id)?"YOU":""}</span></div>`).join("")
       :'<p class="note" style="margin:0">Nobody yet.</p>'}
   </div>
   ${S.mode==="local"?`
@@ -533,6 +564,15 @@ function lobby(){
 }
 
 function footer(){
+  if(S.leaving){
+    const mid = S.game && S.game.phase!=="lobby";
+    return `<div class="rule"></div>
+      <div class="err" style="margin-top:0">${mid
+        ?"Leave for good? Everyone will see you've gone, your turns get skipped, and your cards will answer suggestions on their own. You can come back with the same name."
+        :"Leave this game? You'll be taken off the list."}</div>
+      <button class="btn signal" data-a="leave">Yes, leave</button>
+      <button class="btn ghost" data-a="stay">Stay</button>`;
+  }
   return `<div class="footer">
     <span class="tag">${S.mode==="online"?"CODE "+esc(S.code):"ONE PHONE"}</span>
     <button data-a="leave">Leave game</button>
@@ -618,7 +658,8 @@ function boardView(g,go,meId){
   html+='<div class="legend">'+g.players.map(p=>'<span'+(p.id===meId?' class="is-me"':"")+'>'+pawnFor(p,meId)+esc(p.name)+
     (p.id===meId?" (you)":"")+
     (p.char&&p.char!==p.name?' <span class="tag">'+esc(p.char)+'</span>':"")+
-    (p.out?' <span class="tag" style="color:var(--signal)">OUT</span>':"")+'</span>').join("")+'</div>';
+    (p.left?' <span class="tag" style="color:var(--signal)">LEFT</span>'
+      :p.out?' <span class="tag" style="color:var(--signal)">OUT</span>':"")+'</span>').join("")+'</div>';
   return html;
 }
 
@@ -771,6 +812,7 @@ function logView(){
   if(!g.log||!g.log.length) return '<p class="note">Nothing yet.</p>';
   return '<div class="eyebrow">The record — everything said out loud</div>'+g.log.map(e=>{
     if(e.t==="start") return '<div class="card"><p class="note" style="margin:0">Cards dealt. Turn order: '+(e.names||[]).map(esc).join(" → ")+'</p></div>';
+    if(e.t==="left") return '<div class="card"><p class="note" style="margin:0">'+esc(e.byName)+' left the game. Their cards still answer suggestions.</p></div>';
     if(e.t==="accuse") return '<div class="card"><div style="font-size:15px;line-height:1.5;color:'+(e.right?"var(--brass)":"var(--signal)")+'">'+
       esc(e.byName)+" accused "+esc(e.suggestion.suspect)+", "+esc(e.suggestion.room)+", "+esc(e.suggestion.weapon)+" — "+(e.right?"correct":"wrong, and out")+".</div></div>";
     const sees=e.by===meId||e.disproverId===meId;
@@ -836,7 +878,14 @@ document.addEventListener("click",async ev=>{
     try{ gm=await netGet(code); }catch(e){ S.err="Couldn't reach the database — "+e.message+"."; render(); return; }
     if(!gm){ S.err="No game under "+code+". Check the code with the host."; render(); return; }
     const existing=gm.players.find(p=>p.name.toLowerCase()===name.toLowerCase());
-    if(existing){ S.me={id:existing.id,name:existing.name}; }
+    if(existing){
+      S.me={id:existing.id,name:existing.name};
+      if(existing.left){
+        existing.left=false;
+        existing.out=(existing.wasOut===true);
+        try{ await netPut(gm); }catch(e){}
+      }
+    }
     else{
       if(gm.phase!=="lobby"){ S.err="That game is underway. Rejoin with the exact name you used before."; render(); return; }
       if(gm.players.length>=8){ S.err="That game is full at eight."; render(); return; }
@@ -858,10 +907,26 @@ document.addEventListener("click",async ev=>{
   if(a==="mode"){ S.turnMode=v; S.confirm=false; render(); return; }
   if(a==="confirm"){ S.confirm=true; render(); return; }
   if(a==="mark"){ const id=myId(); if(!id) return; const n=notesFor(id); n[v]=((n[v]||0)+1)%3; saveLocal(); render(); return; }
-  if(a==="leave"||a==="reset"){
+  if(a==="leave"){
+    if(S.mode==="online"&&S.me&&S.game&&!S.leaving){ S.leaving=true; render(); return; }
+    if(S.mode==="online"&&S.me&&S.game){
+      const meId=S.me.id;
+      await mutate(gm=>leaveGame(gm,meId),{quiet:true});
+      try{
+        const after=await netGet(S.code);
+        if(after&&(!after.players||!after.players.length)) await netDelete(S.code);
+      }catch(e){}
+    }
     stopPolling(); clearLocal();
     Object.assign(S,{screen:"home",mode:null,code:null,me:null,viewer:null,game:null,
-      tab:"play",turnMode:"ask",confirm:false,err:"",ok:"",pick:{},notes:{},lastSync:"",busy:false});
+      tab:"play",turnMode:"ask",confirm:false,leaving:false,err:"",ok:"",pick:{},notes:{},lastSync:"",busy:false});
+    render(); return;
+  }
+  if(a==="stay"){ S.leaving=false; render(); return; }
+  if(a==="reset"){
+    stopPolling(); clearLocal();
+    Object.assign(S,{screen:"home",mode:null,code:null,me:null,viewer:null,game:null,
+      tab:"play",turnMode:"ask",confirm:false,leaving:false,err:"",ok:"",pick:{},notes:{},lastSync:"",busy:false});
     render(); return;
   }
 
@@ -937,7 +1002,13 @@ document.addEventListener("click",async ev=>{
         const target=gm.players.find(x=>x.char===sug.suspect);
         if(target&&target.id!==meId){ target.pos={room:sug.room}; target.pulled=true; }
       }
-      gm.pending={by:meId,suggestion:sug,passers:passers,disproverId:disproverId,matches:matches,card:null};
+      /* a player who walked can't tap, so their hand answers automatically */
+      let auto=null;
+      if(disproverId){
+        const dp=byId(gm,disproverId);
+        if(dp&&dp.left) auto=matches[0];
+      }
+      gm.pending={by:meId,suggestion:sug,passers:passers,disproverId:disproverId,matches:matches,card:auto};
     });
     if(!ok&&!S.err) S.err="You can't ask from here.";
     if(ok&&S.mode==="local") S.viewer=null;
