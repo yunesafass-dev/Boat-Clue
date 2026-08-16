@@ -357,7 +357,8 @@ function deal(g){
   const deck=shuffle([].concat(g.setup.suspects,g.setup.weapons,g.setup.rooms)
     .filter(c=>c!==sol.suspect&&c!==sol.weapon&&c!==sol.room));
   g.order=shuffle(g.players.map(p=>p.id));
-  g.players.forEach(p=>{p.hand=[];p.out=false;p.pulled=false;p.char=null;p.pos=null;});
+  g.players.forEach(p=>{p.hand=[];p.out=false;p.pulled=false;p.char=null;p.pos=null;
+    p.usedPass=false;p.passCooldown=0;});
   deck.forEach((c,i)=>byId(g,g.order[i%g.order.length]).hand.push(c));
   if(g.board){
     const b=buildBoard(g.setup.rooms);
@@ -376,7 +377,12 @@ function deal(g){
   g.log=[{t:"start",names:g.order.map(id=>byId(g,id).name)}];
 }
 function advance(g){
-  const prev=byId(g,g.order[g.turn]); if(prev) prev.pulled=false;
+  const prev=byId(g,g.order[g.turn]);
+  if(prev){
+    prev.pulled=false;
+    if(prev.usedPass){ prev.passCooldown=1; prev.usedPass=false; }
+    else if(prev.passCooldown>0){ prev.passCooldown--; }
+  }
   g.ts={roll:null,moved:false};
   for(let i=1;i<=g.order.length;i++){
     const idx=(g.turn+i)%g.order.length;
@@ -649,15 +655,17 @@ function table(){
           <div class="eyebrow">Your move</div>
           ${me.pulled?'<p class="note" style="margin-top:0;color:var(--brass)">You were dragged into the '+esc(inRoom)+'. Ask from here without rolling, or roll and move away.</p>'
                      :'<p class="note" style="margin-top:0">Roll before you can do anything else.</p>'}
-          <button class="btn" data-a="roll">Roll the dice</button>
-          ${passTo?'<button class="btn ghost" data-a="pass" data-v="'+esc(passTo)+'">Take the secret passage to the '+esc(passTo)+'</button>':''}
+          <button class="btn" data-a="roll">Roll the die</button>
+          ${passTo?(me.passCooldown>0
+            ?'<p class="note" style="margin:10px 0 0;color:var(--signal)">You used the secret passage last turn. It\'s closed to you until your next one.</p>'
+            :'<button class="btn ghost" data-a="pass" data-v="'+esc(passTo)+'">Take the secret passage to the '+esc(passTo)+'</button>'):''}
         </div>`;
       }else if(ts.roll&&!ts.moved){
         const n=go?(Object.keys(go.cells).length+Object.keys(go.rooms).length):0;
         moveBlock=`<div class="card">
           <div class="eyebrow">You rolled</div>
-          <div class="dice"><span class="die">${PIPS[ts.d1]||""}</span><span class="die">${PIPS[ts.d2]||""}</span>
-            <span class="big" style="margin:0">${ts.roll}</span></div>
+          <div class="dice"><span class="die">${PIPS[ts.d1]||""}</span>
+            <span class="big" style="margin:0">${ts.roll} ${ts.roll===1?"step":"steps"}</span></div>
           <p class="note" style="margin:0">Tap any glowing square or room — up to ${ts.roll} steps. ${n?"":"Nowhere to go; end your turn."}</p>
           ${n?"":'<button class="btn ghost" data-a="endturn" style="margin-top:12px">End turn</button>'}
         </div>`;
@@ -828,8 +836,8 @@ document.addEventListener("click",async ev=>{
     await mutate(gm=>{
       if(gm.order[gm.turn]!==meId) return;
       const t=TS(gm); if(t.roll||t.moved) return;
-      const d1=d6(), d2=d6();
-      gm.ts={roll:d1+d2,d1:d1,d2:d2,moved:false};
+      const d1=d6();
+      gm.ts={roll:d1,d1:d1,moved:false};
     });
     return;
   }
@@ -838,9 +846,10 @@ document.addEventListener("click",async ev=>{
     await mutate(gm=>{
       const p=byId(gm,meId);
       if(gm.order[gm.turn]!==meId||TS(gm).moved||!p||!roomOf(p)) return;
+      if(p.passCooldown>0) return;
       const b=buildBoard(gm.setup.rooms), R=b.rooms[roomOf(p)];
       if(!R||R.pass!==v) return;
-      p.pos={room:v}; gm.ts={roll:null,moved:true};
+      p.pos={room:v}; p.usedPass=true; gm.ts={roll:null,moved:true};
     });
     return;
   }
